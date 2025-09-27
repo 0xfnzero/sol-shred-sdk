@@ -1,0 +1,75 @@
+syntax = "proto3";
+
+package shredstream;
+import "google/protobuf/timestamp.proto";
+
+
+service ShrederService {
+  rpc SubscribeEntries(SubscribeEntriesRequest) returns (stream Entry);
+  rpc SubscribeTransactions(stream SubscribeTransactionsRequest) returns (stream SubscribeTransactionsResponse);
+}
+
+message SubscribeEntriesRequest {
+  // tbd: we may want to add filters here
+}
+
+message SubscribeTransactionsRequest {
+  map<string, SubscribeRequestFilterTransactions> transactions = 3;
+}
+
+message SubscribeTransactionsResponse {
+  repeated string filters = 1;
+  SubscribeUpdateTransaction transaction = 4;
+  google.protobuf.Timestamp created_at = 11;
+}
+
+message SubscribeUpdateTransaction {
+  Transaction transaction = 1;
+  uint64 slot = 2;
+}
+
+message SubscribeRequestFilterTransactions {
+  repeated string account_include = 3;
+  repeated string account_exclude = 4;
+  repeated string account_required = 6;
+}
+
+message Entry {
+  // the slot that the entry is from
+  uint64 slot = 1;
+
+  // Serialized bytes of Vec<Entry>: https://docs.rs/solana-entry/latest/solana_entry/entry/struct.Entry.html
+  bytes entries = 2;
+}
+
+message MessageHeader {
+  uint32 num_required_signatures = 1;
+  uint32 num_readonly_signed_accounts = 2;
+  uint32 num_readonly_unsigned_accounts = 3;
+}
+
+message CompiledInstruction {
+  uint32 program_id_index = 1;
+  bytes accounts = 2;
+  bytes data = 3;
+}
+
+message MessageAddressTableLookup {
+  bytes account_key = 1;
+  bytes writable_indexes = 2;
+  bytes readonly_indexes = 3;
+}
+
+message Message {
+  MessageHeader header = 1;
+  repeated bytes account_keys = 2;
+  bytes recent_blockhash = 3;
+  repeated CompiledInstruction instructions = 4;
+  bool versioned = 5;
+  repeated MessageAddressTableLookup address_table_lookups = 6;
+}
+
+message Transaction {
+  repeated bytes signatures = 1;
+  Message message = 2;
+}

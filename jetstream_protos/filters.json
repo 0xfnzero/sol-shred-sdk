@@ -1,0 +1,11 @@
+{
+    "filters": {
+        "pumpfun-filter": {
+            "account_include": [
+                "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"
+            ],
+            "account_exclude": [],
+            "account_required": []
+        }
+    }
+}

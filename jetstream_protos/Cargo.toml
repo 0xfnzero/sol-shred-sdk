@@ -1,0 +1,15 @@
+[package]
+name = "jetstream_protos"
+version = "0.0.1"
+description = "Protos for JetStream client"
+edition = "2021"
+
+[dependencies]
+prost = "0.13.5"
+prost-types = "0.13.5"
+tonic = "0.12.3"
+
+[build-dependencies]
+protobuf-src = { version = "1.1.0" }
+tonic-build = { version = "0.12.3" }
+anyhow = "1.0.90"
