@@ -1,6 +1,17 @@
-# ShredStreamGrpc
+# Sol Shred SDK
 
-A gRPC client implementation for subscribing to and processing Solana transaction data.
+A Rust gRPC client implementation for subscribing to and processing Solana ShredStream transaction data.
+
+## What This SDK Provides
+
+This repository contains the `shred-parsed` Rust crate for connecting to a ShredStream gRPC endpoint, decoding Solana transaction entries, and turning PumpFun-related transaction data into callback events.
+
+| Area | Coverage |
+|------|----------|
+| Input | ShredStream gRPC endpoint and Solana transaction entries |
+| Parsing | PumpFun token creation and trade event callbacks |
+| Runtime | Async Rust client, callback-driven event handling, generated Jetstream/ShredStream protobuf bindings |
+| Use cases | Solana bot event feeds, PumpFun launch monitoring, low-latency transaction processing, parser experiments |
 
 ## Features
 
@@ -16,7 +27,7 @@ Add the following to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-shred-parsed = { path = ".", version = "0.1.0" }
+shred-parsed = { path = ".", version = "2.4.3" }
 ```
 
 ## Usage Examples
