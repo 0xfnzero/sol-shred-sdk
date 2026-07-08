@@ -1,6 +1,10 @@
-# Sol Shred SDK
+# Sol Shred SDK - Solana ShredStream & Multi-DEX Event Parser
 
-`sol-shred-sdk` is a multi-source Solana shred ingestion and transaction/event parsing SDK.
+[![Crates.io](https://img.shields.io/crates/v/sol-shred-sdk.svg)](https://crates.io/crates/sol-shred-sdk)
+[![Docs.rs](https://docs.rs/sol-shred-sdk/badge.svg)](https://docs.rs/sol-shred-sdk)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+`sol-shred-sdk` is a low-latency Rust SDK for Solana raw shred decoding, ShredStream ingestion, and multi-DEX transaction event parsing. It turns Solana UDP shreds or Jito-style ShredStream entries into typed `DexEvent` data for trading bots, snipers, indexers, and real-time analytics.
 
 The default, lowest-latency path is:
 
@@ -28,6 +32,15 @@ Migrated parser families match the `sol-parser-sdk` parser surface:
 - Orca Whirlpool
 - Meteora Pools, DAMM V2, DBC, DLMM
 - Token accounts, nonce accounts, selected DEX account state events, and block metadata types
+
+## Use Cases
+
+- Solana low-latency trading bots and sniper bots
+- Real-time PumpFun, PumpSwap, Raydium, Orca, and Meteora event feeds
+- Raw shred UDP ingestion pipelines without relying on Jito ShredStream
+- Jito ShredStream gRPC compatibility while migrating to raw shreds
+- Multi-DEX indexers, analytics, and alerting systems
+- Higher-level parser SDKs that want to reuse one shred/entry ingestion layer
 
 Raw shred subscriptions parse transaction-visible instruction data directly from
 `Entry` transactions. Log-only and account-update event parsers are included for
