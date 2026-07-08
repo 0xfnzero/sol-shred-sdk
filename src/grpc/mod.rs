@@ -52,7 +52,7 @@ lazy_static! {
 pub mod ws_server;
 
 #[deprecated(
-    note = "Jito-style ShredStream gRPC is not a supported ingestion path; use shredstream::ShredStreamClient for raw UDP shreds"
+    note = "legacy PumpFun-only wrapper; use shredstream::ShredStreamClient with ShredDecodeMode::JitoGrpc for unified parsing"
 )]
 pub struct ShredStreamGrpc {
     shredstream_client: Arc<ShredstreamProxyClient<Channel>>,

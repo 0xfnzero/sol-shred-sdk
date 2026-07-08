@@ -18,6 +18,6 @@ pub use grpc::ShredStreamGrpc;
 pub use parser::{PumpfunEventParser, PumpfunParserConfig};
 pub use shred::{RawShredClient, RawShredConfig, RawShredDecoder, ShredEntryBatch, ShredTxBatch};
 pub use shredstream::{
-    parse_transaction_dex_events, parse_transaction_dex_events_with_filter, ShredStreamClient,
-    ShredStreamConfig,
+    parse_transaction_dex_events, parse_transaction_dex_events_with_filter, JitoShredStreamConfig,
+    ShredDecodeMode, ShredStreamClient, ShredStreamConfig,
 };

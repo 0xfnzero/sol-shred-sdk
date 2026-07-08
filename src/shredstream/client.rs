@@ -4,18 +4,22 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crossbeam_queue::ArrayQueue;
+use futures::StreamExt;
+use solana_entry::entry::Entry;
 use solana_sdk::message::VersionedMessage;
 use solana_sdk::transaction::VersionedTransaction;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
-use super::config::ShredStreamConfig;
+use super::config::{JitoShredStreamConfig, ShredDecodeMode, ShredStreamConfig};
 use crate::common::logs_events::PumpfunEvent;
 use crate::common::AnyResult;
 use crate::core::{now_micros, DexEvent};
+use crate::grpc::shredstream::shredstream_proxy_client::ShredstreamProxyClient;
+use crate::grpc::shredstream::SubscribeEntriesRequest;
 use crate::grpc::EventTypeFilter;
 use crate::parser::{PumpfunEventParser, PumpfunParserConfig, TransactionEventParser};
-use crate::shred::{RawShredClient, ShredEntryBatch};
+use crate::shred::{RawShredClient, RawShredConfig, ShredEntryBatch};
 
 static DROPPED_EVENTS: AtomicU64 = AtomicU64::new(0);
 
@@ -59,7 +63,7 @@ fn record_dropped_event() {
     }
 }
 
-/// High-level raw shred subscription client.
+/// High-level multi-source shred subscription client.
 #[derive(Clone)]
 pub struct ShredStreamClient {
     config: ShredStreamConfig,
@@ -73,6 +77,14 @@ impl ShredStreamClient {
         Self::new_with_config(ShredStreamConfig::default().with_udp_bind(udp_bind)).await
     }
 
+    pub async fn new_with_decode_mode(decode_mode: ShredDecodeMode) -> AnyResult<Self> {
+        Self::new_with_config(ShredStreamConfig::default().with_decode_mode(decode_mode)).await
+    }
+
+    pub async fn new_jito_grpc(endpoint: impl Into<String>) -> AnyResult<Self> {
+        Self::new_with_config(ShredStreamConfig::jito_grpc(endpoint)).await
+    }
+
     pub async fn new_with_config(config: ShredStreamConfig) -> AnyResult<Self> {
         Ok(Self {
             config,
@@ -82,8 +94,8 @@ impl ShredStreamClient {
 
     /// Subscribe to all supported DEX events and return a lock-free queue.
     ///
-    /// This is the raw-shred equivalent of `sol-parser-sdk` ShredStream parsing:
-    /// raw UDP shreds -> `Entry` -> `VersionedTransaction` -> `DexEvent`.
+    /// All supported decode modes feed the same parser:
+    /// source -> `Entry` -> `VersionedTransaction` -> `DexEvent`.
     pub async fn subscribe(&self) -> AnyResult<Arc<ArrayQueue<DexEvent>>> {
         self.subscribe_with_filter(None).await
     }
@@ -101,7 +113,7 @@ impl ShredStreamClient {
         Ok(queue)
     }
 
-    /// Lowest-latency built-in DEX path: event callback runs in the raw shred
+    /// Lowest-latency built-in DEX path: event callback runs in the source
     /// receive task.
     pub async fn subscribe_callback<F>(&self, callback: F) -> AnyResult<()>
     where
@@ -134,7 +146,7 @@ impl ShredStreamClient {
     }
 
     /// Lowest-latency built-in PumpFun/Bonk path: event callback runs in the
-    /// raw shred receive task.
+    /// source receive task.
     pub async fn subscribe_pumpfun_callback<F>(
         &self,
         parser_config: PumpfunParserConfig,
@@ -221,7 +233,10 @@ async fn run_dex_with_restarts(
 
     loop {
         if config.max_reconnect_attempts > 0 && attempts >= config.max_reconnect_attempts {
-            log::error!("raw shred dex client stopped after {attempts} failed restart attempts");
+            log::error!(
+                "{} dex client stopped after {attempts} failed restart attempts",
+                config.decode_mode.name()
+            );
             return;
         }
         attempts += 1;
@@ -232,7 +247,8 @@ async fn run_dex_with_restarts(
             }
             Err(error) => {
                 log::error!(
-                    "raw shred dex receive loop failed: {error}; retrying in {}ms",
+                    "{} dex receive loop failed: {error}; retrying in {}ms",
+                    config.decode_mode.name(),
                     config.reconnect_delay_ms
                 );
                 tokio::time::sleep(Duration::from_millis(config.reconnect_delay_ms)).await;
@@ -246,7 +262,20 @@ async fn run_dex_once(
     event_type_filter: Option<&EventTypeFilter>,
     sink: EventSink<DexEvent>,
 ) -> AnyResult<()> {
-    let mut client = RawShredClient::bind(config.raw.clone())
+    match &config.decode_mode {
+        ShredDecodeMode::RawUdp(raw) => {
+            run_raw_dex_once(raw.clone(), event_type_filter, sink).await
+        }
+        ShredDecodeMode::JitoGrpc(jito) => run_jito_dex_once(jito, event_type_filter, sink).await,
+    }
+}
+
+async fn run_raw_dex_once(
+    raw: RawShredConfig,
+    event_type_filter: Option<&EventTypeFilter>,
+    sink: EventSink<DexEvent>,
+) -> AnyResult<()> {
+    let mut client = RawShredClient::bind(raw)
         .await
         .map_err(|error| anyhow::anyhow!(error.to_string()))?;
     let mut events = Vec::with_capacity(4);
@@ -254,6 +283,41 @@ async fn run_dex_once(
         .run_entries(|batch| process_dex_entry_batch(batch, event_type_filter, &sink, &mut events))
         .await
         .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+    Ok(())
+}
+
+async fn run_jito_dex_once(
+    jito: &JitoShredStreamConfig,
+    event_type_filter: Option<&EventTypeFilter>,
+    sink: EventSink<DexEvent>,
+) -> AnyResult<()> {
+    let mut client = ShredstreamProxyClient::connect(jito.endpoint.clone()).await?;
+    let request = tonic::Request::new(SubscribeEntriesRequest {});
+    let mut stream = client.subscribe_entries(request).await?.into_inner();
+    let mut events = Vec::with_capacity(4);
+
+    while let Some(message) = stream.next().await {
+        let message = message?;
+        let Ok(entries) = bincode::deserialize::<Vec<Entry>>(&message.entries) else {
+            log::debug!(
+                "jito grpc entry decode failed slot={} bytes_len={}",
+                message.slot,
+                message.entries.len()
+            );
+            continue;
+        };
+
+        process_dex_entry_batch(
+            ShredEntryBatch {
+                slot: message.slot,
+                entries,
+            },
+            event_type_filter,
+            &sink,
+            &mut events,
+        );
+    }
+
     Ok(())
 }
 
@@ -358,7 +422,10 @@ where
 
     loop {
         if config.max_reconnect_attempts > 0 && attempts >= config.max_reconnect_attempts {
-            log::error!("raw shred client stopped after {attempts} failed restart attempts");
+            log::error!(
+                "{} client stopped after {attempts} failed restart attempts",
+                config.decode_mode.name()
+            );
             return;
         }
         attempts += 1;
@@ -369,7 +436,8 @@ where
             }
             Err(error) => {
                 log::error!(
-                    "raw shred receive loop failed: {error}; retrying in {}ms",
+                    "{} receive loop failed: {error}; retrying in {}ms",
+                    config.decode_mode.name(),
                     config.reconnect_delay_ms
                 );
                 tokio::time::sleep(Duration::from_millis(config.reconnect_delay_ms)).await;
@@ -387,13 +455,65 @@ where
     P: TransactionEventParser + Send + 'static,
     P::Event: Send + 'static,
 {
-    let mut client = RawShredClient::bind(config.raw.clone())
+    match &config.decode_mode {
+        ShredDecodeMode::RawUdp(raw) => run_raw_once(raw.clone(), parser, sink).await,
+        ShredDecodeMode::JitoGrpc(jito) => run_jito_once(jito, parser, sink).await,
+    }
+}
+
+async fn run_raw_once<P>(
+    raw: RawShredConfig,
+    parser: &mut P,
+    sink: EventSink<P::Event>,
+) -> AnyResult<()>
+where
+    P: TransactionEventParser + Send + 'static,
+    P::Event: Send + 'static,
+{
+    let mut client = RawShredClient::bind(raw)
         .await
         .map_err(|error| anyhow::anyhow!(error.to_string()))?;
     client
         .run_entries(|batch| process_entry_batch(batch, parser, &sink))
         .await
         .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+    Ok(())
+}
+
+async fn run_jito_once<P>(
+    jito: &JitoShredStreamConfig,
+    parser: &mut P,
+    sink: EventSink<P::Event>,
+) -> AnyResult<()>
+where
+    P: TransactionEventParser + Send + 'static,
+    P::Event: Send + 'static,
+{
+    let mut client = ShredstreamProxyClient::connect(jito.endpoint.clone()).await?;
+    let request = tonic::Request::new(SubscribeEntriesRequest {});
+    let mut stream = client.subscribe_entries(request).await?.into_inner();
+
+    while let Some(message) = stream.next().await {
+        let message = message?;
+        let Ok(entries) = bincode::deserialize::<Vec<Entry>>(&message.entries) else {
+            log::debug!(
+                "jito grpc entry decode failed slot={} bytes_len={}",
+                message.slot,
+                message.entries.len()
+            );
+            continue;
+        };
+
+        process_entry_batch(
+            ShredEntryBatch {
+                slot: message.slot,
+                entries,
+            },
+            parser,
+            &sink,
+        );
+    }
+
     Ok(())
 }
 

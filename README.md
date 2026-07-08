@@ -1,21 +1,21 @@
 # Sol Shred SDK
 
-`shred-parsed` is a raw Solana shred ingestion and transaction/event parsing SDK.
+`sol-shred-sdk` is a multi-source Solana shred ingestion and transaction/event parsing SDK.
 
-The primary path is:
+The default, lowest-latency path is:
 
 ```text
 UDP packet -> Solana/Agave Shred -> FEC recovery -> deshred -> Entry -> VersionedTransaction -> event parser
 ```
 
-This SDK does not implement Jito ShredStream as a supported ingestion path. New integrations should use the raw UDP `shred` and `shredstream` modules.
+Source/decode mode is selected with `ShredDecodeMode`. Native raw UDP shreds are the recommended path; Jito-style ShredStream gRPC entries are retained as a compatibility source while Jito service availability lasts.
 
 ## What This SDK Provides
 
 | Area | Coverage |
 |------|----------|
-| Input | Raw UDP Solana shred payloads |
-| Decode | `solana-ledger` `Shred` parsing, Reed-Solomon recovery, `Shredder::deshred`, bincode `Vec<Entry>` decode |
+| Input | Raw UDP Solana shred payloads, or Jito-style ShredStream gRPC entries |
+| Decode | `ShredDecodeMode::RawUdp` uses `solana-ledger` `Shred` parsing, Reed-Solomon recovery, `Shredder::deshred`, and bincode `Vec<Entry>` decode; `ShredDecodeMode::JitoGrpc` receives prebuilt entry batches |
 | Transactions | Entry-to-transaction flattening with slot context |
 | Events | `DexEvent` parser migrated from `sol-parser-sdk` ShredStream handling |
 | Extensibility | `TransactionEventParser` trait for custom parser plug-ins |
@@ -38,7 +38,23 @@ payloads by themselves.
 
 ```toml
 [dependencies]
-shred-parsed = "3.0.0"
+sol-shred-sdk = "3.0.1"
+```
+
+## Decode Mode
+
+Choose the source/decoder when creating the client:
+
+```rust
+use sol_shred_sdk::{RawShredConfig, ShredDecodeMode, ShredStreamClient};
+
+let raw = ShredStreamClient::new_with_decode_mode(
+    ShredDecodeMode::raw_udp(RawShredConfig::default()),
+).await?;
+
+let jito = ShredStreamClient::new_with_decode_mode(
+    ShredDecodeMode::jito_grpc("http://127.0.0.1:10000"),
+).await?;
 ```
 
 ## Raw UDP Event Subscription
@@ -46,8 +62,8 @@ shred-parsed = "3.0.0"
 Bind a UDP socket where your Solana shred source sends raw shred datagrams:
 
 ```rust
-use shred_parsed::shredstream::{ShredStreamClient, ShredStreamConfig};
-use shred_parsed::{DexEvent, EventType, EventTypeFilter};
+use sol_shred_sdk::shredstream::{ShredStreamClient, ShredStreamConfig};
+use sol_shred_sdk::{DexEvent, EventType, EventTypeFilter};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -84,7 +100,7 @@ async fn main() -> anyhow::Result<()> {
 For consumers that prefer polling:
 
 ```rust
-use shred_parsed::shredstream::ShredStreamClient;
+use sol_shred_sdk::shredstream::ShredStreamClient;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -110,7 +126,7 @@ Use the low-level API when you already own the UDP receive loop:
 
 ```rust
 use std::time::Instant;
-use shred_parsed::{RawShredConfig, RawShredDecoder};
+use sol_shred_sdk::{RawShredConfig, RawShredDecoder};
 
 fn handle_packet(decoder: &mut RawShredDecoder, packet: &[u8]) {
     for batch in decoder.push_packet(packet, Instant::now()) {
@@ -130,8 +146,8 @@ let mut decoder = RawShredDecoder::new(RawShredConfig::default());
 `sol-shred-sdk` owns networking, shred reassembly, and transaction traversal. Higher-level crates can plug in event parsing without reimplementing shredstream handling:
 
 ```rust
-use shred_parsed::common::AnyResult;
-use shred_parsed::parser::TransactionEventParser;
+use sol_shred_sdk::common::AnyResult;
+use sol_shred_sdk::parser::TransactionEventParser;
 use solana_sdk::transaction::VersionedTransaction;
 
 struct MyParser;
@@ -165,8 +181,8 @@ impl TransactionEventParser for MyParser {
 - `RawShredConfig::forward_slot_watermark` defaults to `false` so out-of-order completed slots are not dropped. Enable it only when you explicitly prefer forward-only latency over completeness.
 - `ShredStreamConfig::low_latency()` favors shorter reassembly waits and faster restart.
 - `ShredStreamConfig::high_throughput()` increases receive buffering, tracked slots, and queue capacity.
+- `ShredDecodeMode::JitoGrpc` keeps the old entries-gRPC source but still uses the same unified `DexEvent` parser.
 - The UDP receive buffer is requested with `socket2`; the OS may cap the actual value.
-- Generated proto/type compatibility surfaces are not the recommended ingestion path.
 
 ## Decoder Benchmark
 

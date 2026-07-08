@@ -1,4 +1,4 @@
-//! Multi-DEX transaction parser entry points for raw shred ingestion.
+//! Multi-DEX transaction parser entry points for shred/entry ingestion.
 //!
 //! The implementation currently lives in `pump_ix` for compatibility with the
 //! migrated `sol-parser-sdk` shredstream code. New code should use this module.
