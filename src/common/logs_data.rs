@@ -7,7 +7,7 @@ use crate::common::error::{ClientError, ClientResult};
 pub enum DexInstruction {
     CreateToken(CreateTokenInfo),
     BonkCreateToken(BonkCreateTokenInfo),
-    BonkUserTrade(TradeRequest), 
+    BonkUserTrade(TradeRequest),
     BonkTrade(TradeRequest),
     UserTrade(TradeInfo),
     BotTrade(TradeInfo),
@@ -47,9 +47,6 @@ pub struct TradeRequest {
     pub trade_type: TradeType,
 }
 
-
-
-
 #[derive(Clone, Debug, Default, PartialEq, BorshDeserialize, BorshSerialize)]
 pub struct BonkCreateTokenInfo {
     pub payer: String,
@@ -66,7 +63,7 @@ pub struct BonkCreateTokenInfo {
     pub uri: String,
     pub unit_limit: u32,
     pub unit_price: u64,
-    pub fee_merchant: String, 
+    pub fee_merchant: String,
     pub fee: u64,
 }
 

@@ -47,10 +47,10 @@ pub mod shredstream_client {
         dead_code,
         missing_docs,
         clippy::wildcard_imports,
-        clippy::let_unit_value,
+        clippy::let_unit_value
     )]
-    use tonic::codegen::*;
     use tonic::codegen::http::Uri;
+    use tonic::codegen::*;
     #[derive(Debug, Clone)]
     pub struct ShredstreamClient<T> {
         inner: tonic::client::Grpc<T>,
@@ -94,9 +94,8 @@ pub mod shredstream_client {
                     <T as tonic::client::GrpcService<tonic::body::BoxBody>>::ResponseBody,
                 >,
             >,
-            <T as tonic::codegen::Service<
-                http::Request<tonic::body::BoxBody>,
-            >>::Error: Into<StdError> + std::marker::Send + std::marker::Sync,
+            <T as tonic::codegen::Service<http::Request<tonic::body::BoxBody>>>::Error:
+                Into<StdError> + std::marker::Send + std::marker::Sync,
         {
             ShredstreamClient::new(InterceptedService::new(inner, interceptor))
         }
@@ -135,22 +134,13 @@ pub mod shredstream_client {
         pub async fn send_heartbeat(
             &mut self,
             request: impl tonic::IntoRequest<super::Heartbeat>,
-        ) -> std::result::Result<
-            tonic::Response<super::HeartbeatResponse>,
-            tonic::Status,
-        > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+        ) -> std::result::Result<tonic::Response<super::HeartbeatResponse>, tonic::Status> {
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic::codec::ProstCodec::default();
-            let path = http::uri::PathAndQuery::from_static(
-                "/shredstream.Shredstream/SendHeartbeat",
-            );
+            let path =
+                http::uri::PathAndQuery::from_static("/shredstream.Shredstream/SendHeartbeat");
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("shredstream.Shredstream", "SendHeartbeat"));
@@ -165,10 +155,10 @@ pub mod shredstream_proxy_client {
         dead_code,
         missing_docs,
         clippy::wildcard_imports,
-        clippy::let_unit_value,
+        clippy::let_unit_value
     )]
-    use tonic::codegen::*;
     use tonic::codegen::http::Uri;
+    use tonic::codegen::*;
     #[derive(Debug, Clone)]
     pub struct ShredstreamProxyClient<T> {
         inner: tonic::client::Grpc<T>,
@@ -212,9 +202,8 @@ pub mod shredstream_proxy_client {
                     <T as tonic::client::GrpcService<tonic::body::BoxBody>>::ResponseBody,
                 >,
             >,
-            <T as tonic::codegen::Service<
-                http::Request<tonic::body::BoxBody>,
-            >>::Error: Into<StdError> + std::marker::Send + std::marker::Sync,
+            <T as tonic::codegen::Service<http::Request<tonic::body::BoxBody>>>::Error:
+                Into<StdError> + std::marker::Send + std::marker::Sync,
         {
             ShredstreamProxyClient::new(InterceptedService::new(inner, interceptor))
         }
@@ -256,23 +245,18 @@ pub mod shredstream_proxy_client {
             tonic::Response<tonic::codec::Streaming<super::Entry>>,
             tonic::Status,
         > {
-            self.inner
-                .ready()
-                .await
-                .map_err(|e| {
-                    tonic::Status::unknown(
-                        format!("Service was not ready: {}", e.into()),
-                    )
-                })?;
+            self.inner.ready().await.map_err(|e| {
+                tonic::Status::unknown(format!("Service was not ready: {}", e.into()))
+            })?;
             let codec = tonic::codec::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
                 "/shredstream.ShredstreamProxy/SubscribeEntries",
             );
             let mut req = request.into_request();
-            req.extensions_mut()
-                .insert(
-                    GrpcMethod::new("shredstream.ShredstreamProxy", "SubscribeEntries"),
-                );
+            req.extensions_mut().insert(GrpcMethod::new(
+                "shredstream.ShredstreamProxy",
+                "SubscribeEntries",
+            ));
             self.inner.server_streaming(req, path, codec).await
         }
     }

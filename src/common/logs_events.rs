@@ -1,7 +1,9 @@
+use crate::common::logs_data::{
+    BonkCreateTokenInfo, CreateTokenInfo, EventTrait, TradeInfo, TradeRequest, TransferInfo,
+};
 use base64::engine::general_purpose;
 use base64::Engine;
 use regex::Regex;
-use crate::common::logs_data::{CreateTokenInfo, TradeInfo, EventTrait, TransferInfo, TipInfo, BonkCreateTokenInfo, TradeRequest};
 
 pub const PROGRAM_DATA: &str = "Program data: ";
 
@@ -9,7 +11,7 @@ pub const PROGRAM_DATA: &str = "Program data: ";
 pub enum PumpfunEvent {
     NewToken(CreateTokenInfo),
     // NewDevTrade(TradeInfo),
-    NewBonkToken{
+    NewBonkToken {
         token: BonkCreateTokenInfo,
         trade: TradeRequest,
     },
@@ -22,7 +24,6 @@ pub enum PumpfunEvent {
     // NewTip(TipInfo),
     Error(String),
 }
-
 
 #[derive(Debug)]
 pub enum DexEvent {

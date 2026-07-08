@@ -1,9 +1,9 @@
-use tokio_tungstenite::accept_async;
-use tokio::net::TcpListener;
-use futures_util::{StreamExt, SinkExt};
-use tokio_tungstenite::tungstenite::Message;
-use tokio::time::{interval, Duration};
 use super::WS_SENDER;
+use futures_util::{SinkExt, StreamExt};
+use tokio::net::TcpListener;
+use tokio::time::{interval, Duration};
+use tokio_tungstenite::accept_async;
+use tokio_tungstenite::tungstenite::Message;
 
 pub async fn run_ws_server(addr: &str) {
     let listener = TcpListener::bind(addr).await.unwrap();
@@ -14,17 +14,17 @@ pub async fn run_ws_server(addr: &str) {
         tokio::spawn(async move {
             let ws_stream = accept_async(stream).await.unwrap();
             let (mut ws_sender, mut ws_receiver) = ws_stream.split();
-            
+
             // 创建一个心跳任务
             let mut ping_interval = interval(Duration::from_secs(30));
-            
+
             // 处理接收消息的任务
             let receive_task = tokio::spawn(async move {
                 while let Some(Ok(_msg)) = ws_receiver.next().await {
                     // 可以处理客户端发来的消息
                 }
             });
-            
+
             // 处理发送消息和心跳的任务
             let send_task = tokio::spawn(async move {
                 loop {
@@ -46,7 +46,7 @@ pub async fn run_ws_server(addr: &str) {
                     }
                 }
             });
-            
+
             // 等待任意一个任务结束
             tokio::select! {
                 _ = receive_task => {},
@@ -54,4 +54,4 @@ pub async fn run_ws_server(addr: &str) {
             }
         });
     }
-} 
+}

@@ -4,4 +4,4 @@ pub struct Socket {
     pub ip: String,
     #[prost(uint32, tag = "2")]
     pub port: u32,
-} 
+}
