@@ -95,441 +95,24 @@ pub fn parse_pumpswap_inner_instruction(
 // Buy 事件解析器
 // ============================================================================
 
-/// 解析 Buy 事件（统一入口）
-///
-/// 根据编译时的 feature flag 自动选择解析器实现
+/// Parse BuyEvent through the shared log/inner decoder.
 #[inline(always)]
 fn parse_buy_inner(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
-    #[cfg(all(feature = "parse-borsh", not(feature = "parse-zero-copy")))]
-    {
-        parse_buy_inner_borsh(data, metadata)
-    }
-
-    #[cfg(feature = "parse-zero-copy")]
-    {
-        parse_buy_inner_zero_copy(data, metadata)
-    }
-}
-
-/// Borsh 反序列化解析器 - Buy 事件
-///
-/// **优点**: 类型安全、代码简洁、自动验证
-#[cfg(all(feature = "parse-borsh", not(feature = "parse-zero-copy")))]
-#[inline(always)]
-fn parse_buy_inner_borsh(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
     crate::logs::pump_amm::parse_buy_from_data(data, metadata)
-}
-
-/// 零拷贝解析器 - Buy 事件
-///
-/// **优点**: 最快、零拷贝、无验证开销
-#[cfg(feature = "parse-zero-copy")]
-#[inline(always)]
-fn parse_buy_inner_zero_copy(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
-    // PumpSwap Buy 事件固定字段到 last_update_timestamp 共 385 bytes.
-    // timestamp: i64 (8)
-    // base_amount_out: u64 (8)
-    // max_quote_amount_in: u64 (8)
-    // user_base_token_reserves: u64 (8)
-    // user_quote_token_reserves: u64 (8)
-    // pool_base_token_reserves: u64 (8)
-    // pool_quote_token_reserves: u64 (8)
-    // quote_amount_in: u64 (8)
-    // lp_fee_basis_points: u64 (8)
-    // lp_fee: u64 (8)
-    // protocol_fee_basis_points: u64 (8)
-    // protocol_fee: u64 (8)
-    // quote_amount_in_with_lp_fee: u64 (8)
-    // user_quote_amount_in: u64 (8)
-    // pool: Pubkey (32)
-    // user: Pubkey (32)
-    // user_base_token_account: Pubkey (32)
-    // user_quote_token_account: Pubkey (32)
-    // protocol_fee_recipient: Pubkey (32)
-    // protocol_fee_recipient_token_account: Pubkey (32)
-    // coin_creator: Pubkey (32)
-    // coin_creator_fee_basis_points: u64 (8)
-    // coin_creator_fee: u64 (8)
-    // track_volume: bool (1)
-    // total_unclaimed_tokens: u64 (8)
-    // total_claimed_tokens: u64 (8)
-    // current_sol_volume: u64 (8)
-    // last_update_timestamp: i64 (8)
-
-    unsafe {
-        const MIN_SIZE: usize = 16 * 8 + 32 * 7 + 1 + 4 * 8;
-        if !check_length(data, MIN_SIZE) {
-            return None;
-        }
-
-        let mut offset = 0;
-
-        // 解析数值字段
-        let timestamp = read_i64_unchecked(data, offset);
-        offset += 8;
-        let base_amount_out = read_u64_unchecked(data, offset);
-        offset += 8;
-        let max_quote_amount_in = read_u64_unchecked(data, offset);
-        offset += 8;
-        let user_base_token_reserves = read_u64_unchecked(data, offset);
-        offset += 8;
-        let user_quote_token_reserves = read_u64_unchecked(data, offset);
-        offset += 8;
-        let pool_base_token_reserves = read_u64_unchecked(data, offset);
-        offset += 8;
-        let pool_quote_token_reserves = read_u64_unchecked(data, offset);
-        offset += 8;
-        let quote_amount_in = read_u64_unchecked(data, offset);
-        offset += 8;
-        let lp_fee_basis_points = read_u64_unchecked(data, offset);
-        offset += 8;
-        let lp_fee = read_u64_unchecked(data, offset);
-        offset += 8;
-        let protocol_fee_basis_points = read_u64_unchecked(data, offset);
-        offset += 8;
-        let protocol_fee = read_u64_unchecked(data, offset);
-        offset += 8;
-        let quote_amount_in_with_lp_fee = read_u64_unchecked(data, offset);
-        offset += 8;
-        let user_quote_amount_in = read_u64_unchecked(data, offset);
-        offset += 8;
-
-        // 解析 Pubkey 字段
-        let pool = read_pubkey_unchecked(data, offset);
-        offset += 32;
-        let user = read_pubkey_unchecked(data, offset);
-        offset += 32;
-        let user_base_token_account = read_pubkey_unchecked(data, offset);
-        offset += 32;
-        let user_quote_token_account = read_pubkey_unchecked(data, offset);
-        offset += 32;
-        let protocol_fee_recipient = read_pubkey_unchecked(data, offset);
-        offset += 32;
-        let protocol_fee_recipient_token_account = read_pubkey_unchecked(data, offset);
-        offset += 32;
-        let coin_creator = read_pubkey_unchecked(data, offset);
-        offset += 32;
-
-        let coin_creator_fee_basis_points = read_u64_unchecked(data, offset);
-        offset += 8;
-        let coin_creator_fee = read_u64_unchecked(data, offset);
-        offset += 8;
-
-        let track_volume = data[offset] != 0;
-        offset += 1;
-
-        let total_unclaimed_tokens = read_u64_unchecked(data, offset);
-        offset += 8;
-        let total_claimed_tokens = read_u64_unchecked(data, offset);
-        offset += 8;
-        let current_sol_volume = read_u64_unchecked(data, offset);
-        offset += 8;
-        let last_update_timestamp = read_i64_unchecked(data, offset);
-        offset += 8;
-
-        // min_base_amount_out, ix_name (variable), cashback_fee_basis_points, cashback
-        let min_base_amount_out = if offset + 8 <= data.len() {
-            let v = read_u64_unchecked(data, offset);
-            offset += 8;
-            v
-        } else {
-            0
-        };
-        let ix_name = if offset + 4 <= data.len() {
-            if let Some((s, consumed)) = read_string_unchecked(data, offset) {
-                offset += consumed;
-                s
-            } else {
-                String::new()
-            }
-        } else {
-            String::new()
-        };
-        let cashback_fee_basis_points = if offset + 8 <= data.len() {
-            let v = read_u64_unchecked(data, offset);
-            offset += 8;
-            v
-        } else {
-            0
-        };
-        let cashback = if offset + 8 <= data.len() {
-            read_u64_unchecked(data, offset)
-        } else {
-            0
-        };
-        offset += 8;
-        let buyback_fee_basis_points = if offset + 8 <= data.len() {
-            read_u64_unchecked(data, offset)
-        } else {
-            0
-        };
-        offset += 8;
-        let buyback_fee = if offset + 8 <= data.len() {
-            read_u64_unchecked(data, offset)
-        } else {
-            0
-        };
-        offset += 8;
-        let virtual_quote_reserves = if offset + 16 <= data.len() {
-            read_i128_unchecked(data, offset)
-        } else {
-            0
-        };
-        offset += 16;
-        let can_boost = if offset < data.len() {
-            data[offset] != 0
-        } else {
-            false
-        };
-        offset += 1;
-        let base_supply = if offset + 8 <= data.len() {
-            read_u64_unchecked(data, offset)
-        } else {
-            0
-        };
-
-        Some(DexEvent::PumpSwapBuy(PumpSwapBuyEvent {
-            metadata,
-            timestamp,
-            base_amount_out,
-            max_quote_amount_in,
-            user_base_token_reserves,
-            user_quote_token_reserves,
-            pool_base_token_reserves,
-            pool_quote_token_reserves,
-            quote_amount_in,
-            lp_fee_basis_points,
-            lp_fee,
-            protocol_fee_basis_points,
-            protocol_fee,
-            quote_amount_in_with_lp_fee,
-            user_quote_amount_in,
-            pool,
-            user,
-            user_base_token_account,
-            user_quote_token_account,
-            protocol_fee_recipient,
-            protocol_fee_recipient_token_account,
-            coin_creator,
-            coin_creator_fee_basis_points,
-            coin_creator_fee,
-            track_volume,
-            total_unclaimed_tokens,
-            total_claimed_tokens,
-            current_sol_volume,
-            last_update_timestamp,
-            min_base_amount_out,
-            ix_name,
-            cashback_fee_basis_points,
-            cashback,
-            buyback_fee_basis_points,
-            buyback_fee,
-            virtual_quote_reserves,
-            can_boost,
-            base_supply,
-            ..Default::default()
-        }))
-    }
 }
 
 // ============================================================================
 // Sell 事件解析器
 // ============================================================================
 
-/// 解析 Sell 事件（统一入口）
-///
-/// 根据编译时的 feature flag 自动选择解析器实现
+/// Parse SellEvent through the shared log/inner decoder.
 #[inline(always)]
 fn parse_sell_inner(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
-    #[cfg(all(feature = "parse-borsh", not(feature = "parse-zero-copy")))]
-    {
-        parse_sell_inner_borsh(data, metadata)
+    let mut event = crate::logs::pump_amm::parse_sell_from_data(data, metadata)?;
+    if let DexEvent::PumpSwapSell(sell) = &mut event {
+        sell.is_pump_pool = true;
     }
-
-    #[cfg(feature = "parse-zero-copy")]
-    {
-        parse_sell_inner_zero_copy(data, metadata)
-    }
-}
-
-/// Borsh 反序列化解析器 - Sell 事件
-///
-/// **优点**: 类型安全、代码简洁、自动验证
-#[cfg(all(feature = "parse-borsh", not(feature = "parse-zero-copy")))]
-#[inline(always)]
-fn parse_sell_inner_borsh(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
-    crate::logs::pump_amm::parse_sell_from_data(data, metadata)
-}
-
-/// 零拷贝解析器 - Sell 事件
-///
-/// **优点**: 最快、零拷贝、无验证开销
-#[cfg(feature = "parse-zero-copy")]
-#[inline(always)]
-fn parse_sell_inner_zero_copy(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
-    // PumpSwap Sell 事件数据结构 (352 bytes):
-    // timestamp: i64 (8)
-    // base_amount_in: u64 (8)
-    // min_quote_amount_out: u64 (8)
-    // user_base_token_reserves: u64 (8)
-    // user_quote_token_reserves: u64 (8)
-    // pool_base_token_reserves: u64 (8)
-    // pool_quote_token_reserves: u64 (8)
-    // quote_amount_out: u64 (8)
-    // lp_fee_basis_points: u64 (8)
-    // lp_fee: u64 (8)
-    // protocol_fee_basis_points: u64 (8)
-    // protocol_fee: u64 (8)
-    // quote_amount_out_without_lp_fee: u64 (8)
-    // user_quote_amount_out: u64 (8)
-    // pool: Pubkey (32)
-    // user: Pubkey (32)
-    // user_base_token_account: Pubkey (32)
-    // user_quote_token_account: Pubkey (32)
-    // protocol_fee_recipient: Pubkey (32)
-    // protocol_fee_recipient_token_account: Pubkey (32)
-    // coin_creator: Pubkey (32)
-    // coin_creator_fee_basis_points: u64 (8)
-    // coin_creator_fee: u64 (8)
-    // cashback_fee_basis_points: u64 (8)
-    // cashback: u64 (8)
-
-    unsafe {
-        const MIN_SIZE: usize = 8 * 16 + 32 * 7; // 352-byte legacy payload
-        if !check_length(data, MIN_SIZE) {
-            return None;
-        }
-
-        let mut offset = 0;
-
-        // 解析数值字段
-        let timestamp = read_i64_unchecked(data, offset);
-        offset += 8;
-        let base_amount_in = read_u64_unchecked(data, offset);
-        offset += 8;
-        let min_quote_amount_out = read_u64_unchecked(data, offset);
-        offset += 8;
-        let user_base_token_reserves = read_u64_unchecked(data, offset);
-        offset += 8;
-        let user_quote_token_reserves = read_u64_unchecked(data, offset);
-        offset += 8;
-        let pool_base_token_reserves = read_u64_unchecked(data, offset);
-        offset += 8;
-        let pool_quote_token_reserves = read_u64_unchecked(data, offset);
-        offset += 8;
-        let quote_amount_out = read_u64_unchecked(data, offset);
-        offset += 8;
-        let lp_fee_basis_points = read_u64_unchecked(data, offset);
-        offset += 8;
-        let lp_fee = read_u64_unchecked(data, offset);
-        offset += 8;
-        let protocol_fee_basis_points = read_u64_unchecked(data, offset);
-        offset += 8;
-        let protocol_fee = read_u64_unchecked(data, offset);
-        offset += 8;
-        let quote_amount_out_without_lp_fee = read_u64_unchecked(data, offset);
-        offset += 8;
-        let user_quote_amount_out = read_u64_unchecked(data, offset);
-        offset += 8;
-
-        // 解析 Pubkey 字段
-        let pool = read_pubkey_unchecked(data, offset);
-        offset += 32;
-        let user = read_pubkey_unchecked(data, offset);
-        offset += 32;
-        let user_base_token_account = read_pubkey_unchecked(data, offset);
-        offset += 32;
-        let user_quote_token_account = read_pubkey_unchecked(data, offset);
-        offset += 32;
-        let protocol_fee_recipient = read_pubkey_unchecked(data, offset);
-        offset += 32;
-        let protocol_fee_recipient_token_account = read_pubkey_unchecked(data, offset);
-        offset += 32;
-        let coin_creator = read_pubkey_unchecked(data, offset);
-        offset += 32;
-
-        let coin_creator_fee_basis_points = read_u64_unchecked(data, offset);
-        offset += 8;
-        let coin_creator_fee = read_u64_unchecked(data, offset);
-        offset += 8;
-        let cashback_fee_basis_points = if offset + 8 <= data.len() {
-            read_u64_unchecked(data, offset)
-        } else {
-            0
-        };
-        offset += 8;
-        let cashback = if offset + 8 <= data.len() {
-            read_u64_unchecked(data, offset)
-        } else {
-            0
-        };
-        offset += 8;
-        let buyback_fee_basis_points = if offset + 8 <= data.len() {
-            read_u64_unchecked(data, offset)
-        } else {
-            0
-        };
-        offset += 8;
-        let buyback_fee = if offset + 8 <= data.len() {
-            read_u64_unchecked(data, offset)
-        } else {
-            0
-        };
-        offset += 8;
-        let virtual_quote_reserves = if offset + 16 <= data.len() {
-            read_i128_unchecked(data, offset)
-        } else {
-            0
-        };
-        offset += 16;
-        let can_boost = if offset < data.len() {
-            data[offset] != 0
-        } else {
-            false
-        };
-        offset += 1;
-        let base_supply = if offset + 8 <= data.len() {
-            read_u64_unchecked(data, offset)
-        } else {
-            0
-        };
-
-        Some(DexEvent::PumpSwapSell(PumpSwapSellEvent {
-            metadata,
-            timestamp,
-            base_amount_in,
-            min_quote_amount_out,
-            user_base_token_reserves,
-            user_quote_token_reserves,
-            pool_base_token_reserves,
-            pool_quote_token_reserves,
-            quote_amount_out,
-            lp_fee_basis_points,
-            lp_fee,
-            protocol_fee_basis_points,
-            protocol_fee,
-            quote_amount_out_without_lp_fee,
-            user_quote_amount_out,
-            pool,
-            user,
-            user_base_token_account,
-            user_quote_token_account,
-            protocol_fee_recipient,
-            protocol_fee_recipient_token_account,
-            coin_creator,
-            coin_creator_fee_basis_points,
-            coin_creator_fee,
-            cashback_fee_basis_points,
-            cashback,
-            buyback_fee_basis_points,
-            buyback_fee,
-            virtual_quote_reserves,
-            can_boost,
-            base_supply,
-            is_pump_pool: true,
-            ..Default::default()
-        }))
-    }
+    Some(event)
 }
 
 /// 解析 CreatePool 事件
@@ -623,5 +206,36 @@ fn parse_remove_liquidity_inner(data: &[u8], metadata: EventMetadata) -> Option<
                 ..Default::default()
             },
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shared_trade_decoder_is_used_without_feature_specific_layouts() {
+        let buy = parse_pumpswap_inner_instruction(
+            &discriminators::BUY,
+            &[0u8; 397],
+            EventMetadata::default(),
+        )
+        .expect("legacy buy event should parse");
+        let DexEvent::PumpSwapBuy(buy) = buy else {
+            panic!("expected PumpSwapBuy event");
+        };
+        assert_eq!(buy.virtual_quote_reserves, 0);
+
+        let sell = parse_pumpswap_inner_instruction(
+            &discriminators::SELL,
+            &[0u8; 352],
+            EventMetadata::default(),
+        )
+        .expect("legacy sell event should parse");
+        let DexEvent::PumpSwapSell(sell) = sell else {
+            panic!("expected PumpSwapSell event");
+        };
+        assert!(sell.is_pump_pool);
+        assert_eq!(sell.virtual_quote_reserves, 0);
     }
 }
