@@ -51,8 +51,21 @@ payloads by themselves.
 
 ```toml
 [dependencies]
-sol-shred-sdk = "3.0.1"
+sol-shred-sdk = "3.0.2"
 ```
+
+## PumpSwap Effective Quote Reserves
+
+PumpSwap Pool accounts and Buy/Sell events expose the appended signed
+`virtual_quote_reserves` field. For quoting and indexing, use:
+
+```text
+effective_quote_reserves = pool_quote_token_account.amount + virtual_quote_reserves
+```
+
+Legacy Pool accounts remain supported and decode this field as `0`. Use checked
+signed arithmetic when combining the raw token-account balance (`u64`) with the
+virtual reserve (`i128`). The base reserve remains the raw base-vault balance.
 
 ## Decode Mode
 

@@ -635,6 +635,21 @@ pub struct PumpSwapBuyEvent {
     pub cashback_fee_basis_points: u64,
     /// Cashback amount (PUMP_CASHBACK_README)
     pub cashback: u64,
+    /// Buyback fee basis points.
+    #[serde(default)]
+    pub buyback_fee_basis_points: u64,
+    /// Buyback fee amount.
+    #[serde(default)]
+    pub buyback_fee: u64,
+    /// Appended quote reserves used for effective-reserve pricing.
+    #[serde(default)]
+    pub virtual_quote_reserves: i128,
+    /// Whether this pool is eligible for boost.
+    #[serde(default)]
+    pub can_boost: bool,
+    /// Base token supply after the trade.
+    #[serde(default)]
+    pub base_supply: u64,
 
     // === 额外的信息 ===
     #[borsh(skip)]
@@ -697,6 +712,21 @@ pub struct PumpSwapSellEvent {
     pub cashback_fee_basis_points: u64,
     /// Cashback amount (PUMP_CASHBACK_README)
     pub cashback: u64,
+    /// Buyback fee basis points.
+    #[serde(default)]
+    pub buyback_fee_basis_points: u64,
+    /// Buyback fee amount.
+    #[serde(default)]
+    pub buyback_fee: u64,
+    /// Appended quote reserves used for effective-reserve pricing.
+    #[serde(default)]
+    pub virtual_quote_reserves: i128,
+    /// Whether this pool is eligible for boost.
+    #[serde(default)]
+    pub can_boost: bool,
+    /// Base token supply after the trade.
+    #[serde(default)]
+    pub base_supply: u64,
 
     // === 额外的信息 ===
     #[borsh(skip)]
@@ -1671,6 +1701,9 @@ pub struct PumpSwapPool {
     pub coin_creator: Pubkey,
     pub is_mayhem_mode: bool,
     pub is_cashback_coin: bool,
+    /// Added by the PumpSwap boost upgrade. Legacy pools decode this as zero.
+    #[serde(default)]
+    pub virtual_quote_reserves: i128,
 }
 
 /// PumpFun Bonding Curve Account Event

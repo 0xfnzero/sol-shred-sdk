@@ -113,25 +113,21 @@ pub unsafe fn read_pubkey_unchecked(data: &[u8], offset: usize) -> solana_sdk::p
     Pubkey::new_from_array(bytes)
 }
 
-/// 零拷贝读取字符串（带长度前缀）
+/// Read a Borsh length-prefixed UTF-8 string.
 ///
 /// # Safety
 ///
-/// Caller must ensure the length-prefixed bytes are readable and valid UTF-8.
+/// This remains `unsafe` for API compatibility. The implementation validates
+/// the prefix, bounds, integer arithmetic, and UTF-8 before returning.
 #[inline(always)]
 pub unsafe fn read_string_unchecked(data: &[u8], offset: usize) -> Option<(String, usize)> {
-    if data.len() < offset + 4 {
-        return None;
-    }
-
-    let len = read_u32_unchecked(data, offset) as usize;
-    if data.len() < offset + 4 + len {
-        return None;
-    }
-
-    let string_bytes = &data[offset + 4..offset + 4 + len];
-    let s = std::str::from_utf8_unchecked(string_bytes);
-    Some((s.to_string(), 4 + len))
+    let content_offset = offset.checked_add(4)?;
+    let len = u32::from_le_bytes(data.get(offset..content_offset)?.try_into().ok()?) as usize;
+    let end = content_offset.checked_add(len)?;
+    let value = std::str::from_utf8(data.get(content_offset..end)?)
+        .ok()?
+        .to_owned();
+    Some((value, 4 + len))
 }
 
 /// 检查数据长度是否足够
