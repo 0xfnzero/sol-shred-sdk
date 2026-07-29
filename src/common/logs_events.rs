@@ -43,7 +43,7 @@ pub enum SystemEvent {
 // pub struct PumpEvent {}
 
 impl PumpfunEvent {
-    pub fn parse_logs(logs: &Vec<String>) -> (Option<CreateTokenInfo>, Option<TradeInfo>) {
+    pub fn parse_logs(logs: &[String]) -> (Option<CreateTokenInfo>, Option<TradeInfo>) {
         let mut create_info: Option<CreateTokenInfo> = None;
         let mut trade_info: Option<TradeInfo> = None;
 
@@ -78,15 +78,14 @@ impl PumpfunEvent {
 pub struct RaydiumEvent {}
 
 impl RaydiumEvent {
-    pub fn parse_logs<T: EventTrait + Clone>(logs: &Vec<String>) -> Option<T> {
+    pub fn parse_logs<T: EventTrait + Clone>(logs: &[String]) -> Option<T> {
         let mut event: Option<T> = None;
 
         if !logs.is_empty() {
             let logs_iter = logs.iter().peekable();
+            let re = Regex::new(r"ray_log: (?P<base64>[A-Za-z0-9+/=]+)").unwrap();
 
             for l in logs_iter.rev() {
-                let re = Regex::new(r"ray_log: (?P<base64>[A-Za-z0-9+/=]+)").unwrap();
-
                 if let Some(caps) = re.captures(l) {
                     if let Some(base64) = caps.name("base64") {
                         let bytes = general_purpose::STANDARD.decode(base64.as_str()).unwrap();

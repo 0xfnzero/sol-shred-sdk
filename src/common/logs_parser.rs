@@ -277,7 +277,7 @@ pub fn parse_instruction_create_token_data(
         name: name.to_string(),
         symbol: symbol.to_string(),
         uri: uri.to_string(),
-        creator: creator,
+        creator,
         mint,
         bonding_curve,
         user,
@@ -431,7 +431,7 @@ pub fn parse_instruction_bonk_create_token_data(
 
 // 修改 parse_mint_params 函数，添加调试信息
 fn parse_mint_params(data: &[u8]) -> ClientResult<(String, String, String, usize)> {
-    if data.len() < 1 {
+    if data.is_empty() {
         return Err(ClientError::InvalidData(
             "MintParams数据长度不足".to_string(),
         ));
@@ -533,7 +533,7 @@ fn parse_mint_params(data: &[u8]) -> ClientResult<(String, String, String, usize
 
 // 修改 parse_curve_params 函数
 fn parse_curve_params(data: &[u8]) -> ClientResult<(u8, u64, u64, usize)> {
-    if data.len() < 1 {
+    if data.is_empty() {
         return Err(ClientError::InvalidData(
             "CurveParams数据长度不足".to_string(),
         ));

@@ -1,3 +1,6 @@
+// Parser entry points intentionally keep explicit context parameters for API compatibility.
+#![allow(clippy::too_many_arguments)]
+
 pub mod accounts;
 pub mod common;
 pub mod constants;

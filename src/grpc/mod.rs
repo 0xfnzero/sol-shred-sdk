@@ -114,7 +114,7 @@ impl ShredStreamGrpc {
             if let Err(e) = parser.process_transaction(
                 &transaction_with_slot.transaction,
                 transaction_with_slot.slot,
-                |event| callback(event),
+                &callback,
             ) {
                 error!("Error processing transaction: {:?}", e);
             }
@@ -171,13 +171,13 @@ impl ShredStreamGrpc {
         let mut total_sol_amount = 0u64;
         let mut total_token_amount = 0u64;
 
-        let instructions = LogFilter::parse_compiled_instruction_shreder(&tx_info).unwrap();
+        let instructions = LogFilter::parse_compiled_instruction_shreder(tx_info).unwrap();
 
         for instruction in instructions {
             match instruction {
                 DexInstruction::CreateToken(mut token) => {
                     let (limit, price, fee_merchant, fee) =
-                        LogFilter::parse_tip_info_shreder(&tx_info);
+                        LogFilter::parse_tip_info_shreder(tx_info);
                     token.slot = slot;
                     token.unit_limit = limit.unwrap_or(0);
                     token.unit_price = price.unwrap_or(0);
@@ -187,7 +187,7 @@ impl ShredStreamGrpc {
                 }
                 DexInstruction::BonkCreateToken(mut token) => {
                     let (limit, price, fee_merchant, fee) =
-                        LogFilter::parse_tip_info_shreder(&tx_info);
+                        LogFilter::parse_tip_info_shreder(tx_info);
                     token.unit_limit = limit.unwrap_or(0);
                     token.unit_price = price.unwrap_or(0);
                     token.fee_merchant = fee_merchant.unwrap_or_default();

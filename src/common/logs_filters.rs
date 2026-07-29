@@ -163,7 +163,7 @@ impl LogFilter {
     ) -> SolanaCompiledInstruction {
         SolanaCompiledInstruction {
             program_id_index: proto_ix.program_id_index as u8,
-            accounts: proto_ix.accounts.iter().map(|&x| x as u8).collect(),
+            accounts: proto_ix.accounts.clone(),
             data: proto_ix.data.clone(),
         }
     }
@@ -398,35 +398,35 @@ impl LogFilter {
         for proto_ix in compiled_instructions {
             let instruction = Self::convert_proto_instruction(proto_ix);
             let program_id = accounts_pubkeys[instruction.program_id_index as usize];
-            if program_id.to_string() == "ComputeBudget111111111111111111111111111111" {
-                if instruction.data.len() > 0 {
-                    match instruction.data[0] {
-                        2 => {
-                            if instruction.data.len() >= 5 {
-                                unit_limit = Some(u32::from_le_bytes([
-                                    instruction.data[1],
-                                    instruction.data[2],
-                                    instruction.data[3],
-                                    instruction.data[4],
-                                ]));
-                            }
+            if program_id.to_string() == "ComputeBudget111111111111111111111111111111"
+                && !instruction.data.is_empty()
+            {
+                match instruction.data[0] {
+                    2 => {
+                        if instruction.data.len() >= 5 {
+                            unit_limit = Some(u32::from_le_bytes([
+                                instruction.data[1],
+                                instruction.data[2],
+                                instruction.data[3],
+                                instruction.data[4],
+                            ]));
                         }
-                        3 => {
-                            if instruction.data.len() >= 9 {
-                                unit_price = Some(u64::from_le_bytes([
-                                    instruction.data[1],
-                                    instruction.data[2],
-                                    instruction.data[3],
-                                    instruction.data[4],
-                                    instruction.data[5],
-                                    instruction.data[6],
-                                    instruction.data[7],
-                                    instruction.data[8],
-                                ]));
-                            }
-                        }
-                        _ => {}
                     }
+                    3 => {
+                        if instruction.data.len() >= 9 {
+                            unit_price = Some(u64::from_le_bytes([
+                                instruction.data[1],
+                                instruction.data[2],
+                                instruction.data[3],
+                                instruction.data[4],
+                                instruction.data[5],
+                                instruction.data[6],
+                                instruction.data[7],
+                                instruction.data[8],
+                            ]));
+                        }
+                    }
+                    _ => {}
                 }
             }
             // 识别 System Program 转账
@@ -475,35 +475,35 @@ impl LogFilter {
         for instruction in compiled_instructions {
             let program_id = accounts[instruction.program_id_index as usize];
 
-            if program_id.to_string() == "ComputeBudget111111111111111111111111111111" {
-                if instruction.data.len() > 0 {
-                    match instruction.data[0] {
-                        2 => {
-                            if instruction.data.len() >= 5 {
-                                unit_limit = Some(u32::from_le_bytes([
-                                    instruction.data[1],
-                                    instruction.data[2],
-                                    instruction.data[3],
-                                    instruction.data[4],
-                                ]));
-                            }
+            if program_id.to_string() == "ComputeBudget111111111111111111111111111111"
+                && !instruction.data.is_empty()
+            {
+                match instruction.data[0] {
+                    2 => {
+                        if instruction.data.len() >= 5 {
+                            unit_limit = Some(u32::from_le_bytes([
+                                instruction.data[1],
+                                instruction.data[2],
+                                instruction.data[3],
+                                instruction.data[4],
+                            ]));
                         }
-                        3 => {
-                            if instruction.data.len() >= 9 {
-                                unit_price = Some(u64::from_le_bytes([
-                                    instruction.data[1],
-                                    instruction.data[2],
-                                    instruction.data[3],
-                                    instruction.data[4],
-                                    instruction.data[5],
-                                    instruction.data[6],
-                                    instruction.data[7],
-                                    instruction.data[8],
-                                ]));
-                            }
-                        }
-                        _ => {}
                     }
+                    3 => {
+                        if instruction.data.len() >= 9 {
+                            unit_price = Some(u64::from_le_bytes([
+                                instruction.data[1],
+                                instruction.data[2],
+                                instruction.data[3],
+                                instruction.data[4],
+                                instruction.data[5],
+                                instruction.data[6],
+                                instruction.data[7],
+                                instruction.data[8],
+                            ]));
+                        }
+                    }
+                    _ => {}
                 }
             }
             // 识别 System Program 转账

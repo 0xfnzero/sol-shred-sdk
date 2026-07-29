@@ -13,7 +13,7 @@
 //! ## 使用示例
 //!
 //! ```rust
-//! use sol_parser_sdk::core::cache::build_account_pubkeys_with_cache;
+//! use sol_shred_sdk::core::cache::build_account_pubkeys_with_cache;
 //! use solana_sdk::pubkey::Pubkey;
 //!
 //! let instruction_accounts = vec![0u8, 1, 2];
@@ -115,7 +115,7 @@ thread_local! {
 ///
 /// # 示例
 /// ```rust
-/// use sol_parser_sdk::core::cache::build_account_pubkeys_with_cache;
+/// use sol_shred_sdk::core::cache::build_account_pubkeys_with_cache;
 /// use solana_sdk::pubkey::Pubkey;
 ///
 /// let instruction_accounts = vec![0u8, 1, 2];

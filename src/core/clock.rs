@@ -16,7 +16,7 @@
 //! ## 使用示例
 //!
 //! ```rust
-//! use sol_parser_sdk::core::clock::{now_micros, elapsed_micros_since};
+//! use sol_shred_sdk::core::clock::{now_micros, elapsed_micros_since};
 //!
 //! // 获取当前时间戳（微秒）
 //! let start = now_micros();
@@ -185,7 +185,7 @@ static HIGH_PERF_CLOCK: once_cell::sync::OnceCell<HighPerformanceClock> =
 ///
 /// # 示例
 /// ```rust
-/// use sol_parser_sdk::core::clock::now_micros;
+/// use sol_shred_sdk::core::clock::now_micros;
 ///
 /// let grpc_recv_us = now_micros();
 /// println!("gRPC 接收时间: {} μs", grpc_recv_us);
@@ -206,7 +206,7 @@ pub fn now_micros() -> i64 {
 ///
 /// # 示例
 /// ```rust
-/// use sol_parser_sdk::core::clock::{now_micros, elapsed_micros_since};
+/// use sol_shred_sdk::core::clock::{now_micros, elapsed_micros_since};
 ///
 /// let start = now_micros();
 /// // ... 执行解析操作 ...
