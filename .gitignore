@@ -5,3 +5,4 @@ Cargo.lock
 *.pdb
 **/mutants.out*/
 #.idea/
+.DS_Store
