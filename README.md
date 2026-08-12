@@ -235,6 +235,8 @@ impl TransactionEventParser for MyParser {
 - `ShredStreamConfig::high_throughput()` increases receive buffering, tracked slots, and queue capacity.
 - `ShredDecodeMode::JitoGrpc` keeps the old entries-gRPC source but still uses the same unified `DexEvent` parser.
 - The UDP receive buffer is requested with `socket2`; the OS may cap the actual value.
+- Merkle FEC recovery follows Agave's wire layout and Jito's threshold rule: recovery starts only after at least `num_data_shreds` distinct data/coding shards are available.
+- Raw UDP decoding does not verify leader signatures because it has no leader schedule. Use a trusted local forwarder, or verify shreds before calling `RawShredDecoder` when accepting untrusted UDP sources.
 
 ## Decoder Benchmark
 

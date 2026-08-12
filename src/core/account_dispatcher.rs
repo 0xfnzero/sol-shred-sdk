@@ -41,6 +41,33 @@ fn find_instruction_invoke<'a>(
     })
 }
 
+/// Prefer the invoke whose anchor account matches the event's pool.
+fn find_instruction_invoke_anchored<'a>(
+    invokes: &'a [(i32, i32)],
+    meta: &TransactionStatusMeta,
+    transaction: &Option<Transaction>,
+    account_keys: Option<&Vec<Vec<u8>>>,
+    anchor_account_index: usize,
+    anchor: &Pubkey,
+) -> Option<&'a (i32, i32)> {
+    if *anchor != Pubkey::default() {
+        if let Some(invoke) = invokes.iter().find(|invoke| {
+            get_instruction_account_getter(
+                meta,
+                transaction,
+                account_keys,
+                &meta.loaded_writable_addresses,
+                &meta.loaded_readonly_addresses,
+                invoke,
+            )
+            .is_some_and(|get_account| get_account(anchor_account_index) == *anchor)
+        }) {
+            return Some(invoke);
+        }
+    }
+    find_instruction_invoke(invokes, meta, transaction)
+}
+
 fn instruction_has_discriminator(
     transaction: &Option<Transaction>,
     outer_idx: i32,
@@ -84,6 +111,61 @@ macro_rules! fill_event_accounts {
                     .as_ref()
                     .and_then(|tx| tx.message.as_ref())
                     .map(|msg| &msg.account_keys);
+                if let Some(get_account) = get_instruction_account_getter(
+                    $meta,
+                    $tx,
+                    account_keys,
+                    &$meta.loaded_writable_addresses,
+                    &$meta.loaded_readonly_addresses,
+                    invoke,
+                ) {
+                    $filler(&get_account);
+                }
+            }
+        }
+    };
+}
+
+macro_rules! fill_event_accounts_anchored {
+    ($meta:expr, $tx:expr, $invokes:expr, $program_id:expr, $anchor:expr, $filler:expr) => {
+        if let Some(invokes) = $invokes.get($program_id) {
+            let account_keys = $tx
+                .as_ref()
+                .and_then(|tx| tx.message.as_ref())
+                .map(|msg| &msg.account_keys);
+            if let Some(invoke) =
+                find_instruction_invoke_anchored(invokes, $meta, $tx, account_keys, 0, $anchor)
+            {
+                if let Some(get_account) = get_instruction_account_getter(
+                    $meta,
+                    $tx,
+                    account_keys,
+                    &$meta.loaded_writable_addresses,
+                    &$meta.loaded_readonly_addresses,
+                    invoke,
+                ) {
+                    $filler(&get_account);
+                }
+            }
+        }
+    };
+}
+
+macro_rules! fill_event_accounts_anchored_at {
+    ($meta:expr, $tx:expr, $invokes:expr, $program_id:expr, $anchor_index:expr, $anchor:expr, $filler:expr) => {
+        if let Some(invokes) = $invokes.get($program_id) {
+            let account_keys = $tx
+                .as_ref()
+                .and_then(|tx| tx.message.as_ref())
+                .map(|msg| &msg.account_keys);
+            if let Some(invoke) = find_instruction_invoke_anchored(
+                invokes,
+                $meta,
+                $tx,
+                account_keys,
+                $anchor_index,
+                $anchor,
+            ) {
                 if let Some(get_account) = get_instruction_account_getter(
                     $meta,
                     $tx,
@@ -194,24 +276,26 @@ pub fn fill_accounts_with_owned_keys(
 
         // PumpSwap
         DexEvent::PumpSwapBuy(e) => {
-            fill_event_accounts!(
-                e,
+            let pool = e.pool;
+            fill_event_accounts_anchored!(
                 meta,
                 transaction,
                 program_invokes,
                 &PUMPSWAP_PROGRAM,
+                &pool,
                 |get: &AccountGetter<'_>| {
                     account_fillers::pumpswap::fill_buy_accounts(e, get);
                 }
             );
         }
         DexEvent::PumpSwapSell(e) => {
-            fill_event_accounts!(
-                e,
+            let pool = e.pool;
+            fill_event_accounts_anchored!(
                 meta,
                 transaction,
                 program_invokes,
                 &PUMPSWAP_PROGRAM,
+                &pool,
                 |get: &AccountGetter<'_>| {
                     account_fillers::pumpswap::fill_sell_accounts(e, get);
                 }
@@ -618,24 +702,28 @@ pub fn fill_accounts_with_owned_keys(
 
         // RaydiumLaunchlab
         DexEvent::RaydiumLaunchlabTrade(e) => {
-            fill_event_accounts!(
-                e,
+            let pool = e.pool_state;
+            fill_event_accounts_anchored_at!(
                 meta,
                 transaction,
                 program_invokes,
                 &RAYDIUM_LAUNCHLAB_PROGRAM,
+                4,
+                &pool,
                 |get: &AccountGetter<'_>| {
                     account_fillers::raydium_launchlab::fill_trade_accounts(e, get);
                 }
             );
         }
         DexEvent::RaydiumLaunchlabPoolCreate(e) => {
-            fill_event_accounts!(
-                e,
+            let pool = e.pool_state;
+            fill_event_accounts_anchored_at!(
                 meta,
                 transaction,
                 program_invokes,
                 &RAYDIUM_LAUNCHLAB_PROGRAM,
+                5,
+                &pool,
                 |get: &AccountGetter<'_>| {
                     account_fillers::raydium_launchlab::fill_pool_create_accounts(e, get);
                 }
@@ -643,5 +731,241 @@ pub fn fill_accounts_with_owned_keys(
         }
 
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::events::{PumpSwapBuyEvent, PumpSwapSellEvent, RaydiumLaunchlabTradeEvent};
+    use crate::grpc::program_ids::{PUMPSWAP_PROGRAM, RAYDIUM_LAUNCHLAB_PROGRAM};
+    use yellowstone_grpc_proto::prelude::{
+        CompiledInstruction, Message, MessageHeader, Transaction, TransactionStatusMeta,
+    };
+
+    struct RouteFixture {
+        meta: TransactionStatusMeta,
+        transaction: Option<Transaction>,
+        invokes: HashMap<Pubkey, Vec<(i32, i32)>>,
+        sell_pool: Pubkey,
+        buy_pool: Pubkey,
+        sell_mint: Pubkey,
+        buy_mint: Pubkey,
+    }
+
+    /// A Jupiter-style token-to-token route: one outer pAMM sell invoke
+    /// (24 accounts, pool/base_mint of leg A) followed by one outer pAMM buy
+    /// invoke (26 accounts — the cashback variant is longer — pool/base_mint
+    /// of leg B). Mirrors live tx DRCWs7iv… where the sell event's base_mint
+    /// was backfilled from the buy leg.
+    fn token_to_token_fixture() -> RouteFixture {
+        let sell_pool = Pubkey::new_unique();
+        let buy_pool = Pubkey::new_unique();
+        let sell_mint = Pubkey::new_unique();
+        let buy_mint = Pubkey::new_unique();
+        let padding = Pubkey::new_unique();
+
+        // static keys: [0]=sell_pool [1]=buy_pool [2]=sell_mint [3]=buy_mint
+        // [4]=pumpswap program [5]=padding
+        let static_keys: Vec<Vec<u8>> = [
+            sell_pool,
+            buy_pool,
+            sell_mint,
+            buy_mint,
+            PUMPSWAP_PROGRAM,
+            padding,
+        ]
+        .iter()
+        .map(|k| k.to_bytes().to_vec())
+        .collect();
+
+        let mut sell_accounts = vec![5u8; 24];
+        sell_accounts[0] = 0; // pool
+        sell_accounts[3] = 2; // base_mint
+        let mut buy_accounts = vec![5u8; 26];
+        buy_accounts[0] = 1; // pool
+        buy_accounts[3] = 3; // base_mint
+
+        let transaction = Some(Transaction {
+            signatures: vec![vec![0u8; 64]],
+            message: Some(Message {
+                header: Some(MessageHeader::default()),
+                account_keys: static_keys,
+                recent_blockhash: vec![0u8; 32],
+                instructions: vec![
+                    CompiledInstruction {
+                        program_id_index: 4,
+                        accounts: sell_accounts,
+                        data: vec![0],
+                    },
+                    CompiledInstruction {
+                        program_id_index: 4,
+                        accounts: buy_accounts,
+                        data: vec![0],
+                    },
+                ],
+                versioned: false,
+                address_table_lookups: Vec::new(),
+            }),
+        });
+        let meta = TransactionStatusMeta::default();
+        let mut invokes = HashMap::new();
+        invokes.insert(PUMPSWAP_PROGRAM, vec![(0i32, -1i32), (1i32, -1i32)]);
+
+        RouteFixture {
+            meta,
+            transaction,
+            invokes,
+            sell_pool,
+            buy_pool,
+            sell_mint,
+            buy_mint,
+        }
+    }
+
+    #[test]
+    fn token_to_token_route_backfills_each_leg_from_its_own_invoke() {
+        let f = token_to_token_fixture();
+
+        let mut sell = DexEvent::PumpSwapSell(PumpSwapSellEvent {
+            pool: f.sell_pool,
+            ..Default::default()
+        });
+        fill_accounts_with_owned_keys(&mut sell, &f.meta, &f.transaction, &f.invokes);
+        match sell {
+            DexEvent::PumpSwapSell(e) => assert_eq!(
+                e.base_mint, f.sell_mint,
+                "sell event must backfill from the SELL leg, not the longer buy invoke"
+            ),
+            _ => unreachable!(),
+        }
+
+        let mut buy = DexEvent::PumpSwapBuy(PumpSwapBuyEvent {
+            pool: f.buy_pool,
+            ..Default::default()
+        });
+        fill_accounts_with_owned_keys(&mut buy, &f.meta, &f.transaction, &f.invokes);
+        match buy {
+            DexEvent::PumpSwapBuy(e) => assert_eq!(e.base_mint, f.buy_mint),
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn anchored_lookup_is_order_independent() {
+        let mut f = token_to_token_fixture();
+        // Reverse invoke order: the buy leg now comes first.
+        f.invokes.get_mut(&PUMPSWAP_PROGRAM).unwrap().reverse();
+
+        let mut sell = DexEvent::PumpSwapSell(PumpSwapSellEvent {
+            pool: f.sell_pool,
+            ..Default::default()
+        });
+        fill_accounts_with_owned_keys(&mut sell, &f.meta, &f.transaction, &f.invokes);
+        match sell {
+            DexEvent::PumpSwapSell(e) => assert_eq!(e.base_mint, f.sell_mint),
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn unmatched_pool_falls_back_to_longest_invoke() {
+        let f = token_to_token_fixture();
+        // Pool that matches no invoke's first account (e.g. a future layout
+        // where the pool moved): keep the historical max-accounts behavior.
+        let mut sell = DexEvent::PumpSwapSell(PumpSwapSellEvent {
+            pool: Pubkey::new_unique(),
+            ..Default::default()
+        });
+        fill_accounts_with_owned_keys(&mut sell, &f.meta, &f.transaction, &f.invokes);
+        match sell {
+            DexEvent::PumpSwapSell(e) => assert_eq!(
+                e.base_mint, f.buy_mint,
+                "fallback must preserve the pre-fix heuristic (longest invoke wins)"
+            ),
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn launchlab_trade_backfills_from_matching_pool_invoke() {
+        let first_pool = Pubkey::new_unique();
+        let second_pool = Pubkey::new_unique();
+        let first_quote_mint = Pubkey::new_unique();
+        let second_quote_mint = Pubkey::new_unique();
+        let padding = Pubkey::new_unique();
+        let account_keys = [
+            first_pool,
+            second_pool,
+            first_quote_mint,
+            second_quote_mint,
+            RAYDIUM_LAUNCHLAB_PROGRAM,
+            padding,
+        ]
+        .iter()
+        .map(|key| key.to_bytes().to_vec())
+        .collect();
+        let launchlab_accounts = |pool_index, quote_mint_index| {
+            let mut accounts = vec![5u8; 15];
+            accounts[4] = pool_index;
+            accounts[10] = quote_mint_index;
+            accounts[14] = 4;
+            accounts
+        };
+        let transaction = Some(Transaction {
+            signatures: vec![vec![0u8; 64]],
+            message: Some(Message {
+                header: Some(MessageHeader::default()),
+                account_keys,
+                recent_blockhash: vec![0u8; 32],
+                instructions: vec![
+                    CompiledInstruction {
+                        program_id_index: 4,
+                        accounts: launchlab_accounts(0, 2),
+                        data: vec![0],
+                    },
+                    CompiledInstruction {
+                        program_id_index: 4,
+                        accounts: launchlab_accounts(1, 3),
+                        data: vec![0],
+                    },
+                ],
+                versioned: false,
+                address_table_lookups: Vec::new(),
+            }),
+        });
+        let meta = TransactionStatusMeta::default();
+        let invokes = HashMap::from([(
+            RAYDIUM_LAUNCHLAB_PROGRAM,
+            vec![(0i32, -1i32), (1i32, -1i32)],
+        )]);
+        let mut event = DexEvent::RaydiumLaunchlabTrade(RaydiumLaunchlabTradeEvent {
+            metadata: EventMetadata::default(),
+            pool_state: first_pool,
+            user: Pubkey::default(),
+            amount_in: 1,
+            amount_out: 2,
+            is_buy: true,
+            trade_direction: TradeDirection::Buy,
+            exact_in: true,
+            global_config: Pubkey::default(),
+            platform_config: Pubkey::default(),
+            user_base_token: Pubkey::default(),
+            user_quote_token: Pubkey::default(),
+            base_vault: Pubkey::default(),
+            quote_vault: Pubkey::default(),
+            base_mint: Pubkey::default(),
+            quote_mint: Pubkey::default(),
+            base_token_program: Pubkey::default(),
+            quote_token_program: Pubkey::default(),
+        });
+
+        fill_accounts_with_owned_keys(&mut event, &meta, &transaction, &invokes);
+
+        let DexEvent::RaydiumLaunchlabTrade(event) = event else {
+            unreachable!();
+        };
+        assert_eq!(event.quote_mint, first_quote_mint);
+        assert_ne!(event.quote_mint, second_quote_mint);
     }
 }

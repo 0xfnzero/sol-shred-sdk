@@ -193,9 +193,31 @@ fn supports_meteora_damm_v2_instruction(instruction_data: &[u8]) -> bool {
 
 #[inline(always)]
 fn supports_meteora_dlmm_instruction(instruction_data: &[u8]) -> bool {
+    let Some(disc) = disc8(instruction_data) else {
+        return false;
+    };
     matches!(
-        instruction_data.first().copied(),
-        Some(0 | 1 | 2 | 7 | 8 | 11 | 13 | 14)
+        disc,
+        meteora_dlmm::discriminators::INITIALIZE_LB_PAIR
+            | meteora_dlmm::discriminators::INITIALIZE_LB_PAIR2
+            | meteora_dlmm::discriminators::INITIALIZE_BIN_ARRAY
+            | meteora_dlmm::discriminators::ADD_LIQUIDITY
+            | meteora_dlmm::discriminators::ADD_LIQUIDITY2
+            | meteora_dlmm::discriminators::REMOVE_LIQUIDITY
+            | meteora_dlmm::discriminators::REMOVE_LIQUIDITY2
+            | meteora_dlmm::discriminators::INITIALIZE_POSITION
+            | meteora_dlmm::discriminators::INITIALIZE_POSITION2
+            | meteora_dlmm::discriminators::INITIALIZE_POSITION_PDA
+            | meteora_dlmm::discriminators::SWAP
+            | meteora_dlmm::discriminators::SWAP2
+            | meteora_dlmm::discriminators::SWAP_EXACT_OUT
+            | meteora_dlmm::discriminators::SWAP_EXACT_OUT2
+            | meteora_dlmm::discriminators::SWAP_WITH_PRICE_IMPACT
+            | meteora_dlmm::discriminators::SWAP_WITH_PRICE_IMPACT2
+            | meteora_dlmm::discriminators::CLAIM_FEE
+            | meteora_dlmm::discriminators::CLAIM_FEE2
+            | meteora_dlmm::discriminators::CLOSE_POSITION
+            | meteora_dlmm::discriminators::CLOSE_POSITION2
     )
 }
 
@@ -541,6 +563,10 @@ mod tests {
             &data8(meteora_damm::discriminators::INITIALIZE_POOL)
         ));
         assert!(instruction_data_may_parse(
+            &METEORA_DLMM_PROGRAM_ID,
+            &data8(meteora_dlmm::discriminators::SWAP2)
+        ));
+        assert!(!instruction_data_may_parse(
             &METEORA_DLMM_PROGRAM_ID,
             &[11, 1, 2, 3]
         ));

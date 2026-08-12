@@ -76,20 +76,20 @@ fn parse_swap_base_in_instruction(
 
     let _minimum_amount_out = read_u64_le(data, offset)?;
 
-    let pool = get_account(accounts, 0)?;
+    let pool = get_account(accounts, 3)?;
     let metadata = create_metadata_simple(signature, slot, tx_index, block_time_us, pool);
 
     Some(DexEvent::RaydiumCpmmSwap(RaydiumCpmmSwapEvent {
         metadata,
 
         // IDL SwapEvent 事件字段 - 从日志填充，这里设置默认值
-        pool_id: Pubkey::default(), // 将从日志填充
-        input_vault_before: 0,      // 将从日志填充
-        output_vault_before: 0,     // 将从日志填充
-        input_amount: 0,            // 将从日志填充
-        output_amount: 0,           // 将从日志填充
-        input_transfer_fee: 0,      // 将从日志填充
-        output_transfer_fee: 0,     // 将从日志填充
+        pool_id: pool,
+        input_vault_before: 0,  // Filled from the event log.
+        output_vault_before: 0, // Filled from the event log.
+        input_amount: 0,        // Filled from the event log.
+        output_amount: 0,       // Filled from the event log.
+        input_transfer_fee: 0,  // Filled from the event log.
+        output_transfer_fee: 0, // Filled from the event log.
         base_input: true,
         // 暂时注释，以后会用，AI禁止改动
         // 指令参数字段
@@ -126,20 +126,20 @@ fn parse_swap_base_out_instruction(
 
     let _amount_out = read_u64_le(data, offset)?;
 
-    let pool = get_account(accounts, 0)?;
+    let pool = get_account(accounts, 3)?;
     let metadata = create_metadata_simple(signature, slot, tx_index, block_time_us, pool);
 
     Some(DexEvent::RaydiumCpmmSwap(RaydiumCpmmSwapEvent {
         metadata,
 
         // IDL SwapEvent 事件字段 - 从日志填充，这里设置默认值
-        pool_id: Pubkey::default(), // 将从日志填充
-        input_vault_before: 0,      // 将从日志填充
-        output_vault_before: 0,     // 将从日志填充
-        input_amount: 0,            // 将从日志填充
-        output_amount: 0,           // 将从日志填充
-        input_transfer_fee: 0,      // 将从日志填充
-        output_transfer_fee: 0,     // 将从日志填充
+        pool_id: pool,
+        input_vault_before: 0,  // Filled from the event log.
+        output_vault_before: 0, // Filled from the event log.
+        input_amount: 0,        // Filled from the event log.
+        output_amount: 0,       // Filled from the event log.
+        input_transfer_fee: 0,  // Filled from the event log.
+        output_transfer_fee: 0, // Filled from the event log.
         base_input: false,
         // 暂时注释，以后会用，AI禁止改动
         // 指令参数字段
@@ -255,4 +255,24 @@ fn parse_withdraw_instruction(
         token0_amount: minimum_token_0_amount, // 先赋值为minimum，logs会覆盖
         token1_amount: minimum_token_1_amount, // 先赋值为minimum，logs会覆盖
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn swap_uses_pool_state_at_account_three() {
+        let accounts: Vec<_> = (0..4).map(|_| Pubkey::new_unique()).collect();
+        let mut data = Vec::from(discriminators::SWAP_BASE_IN);
+        data.extend_from_slice(&100u64.to_le_bytes());
+        data.extend_from_slice(&90u64.to_le_bytes());
+
+        let event =
+            parse_instruction(&data, &accounts, Signature::default(), 1, 0, None).expect("swap");
+        let DexEvent::RaydiumCpmmSwap(event) = event else {
+            panic!("unexpected event")
+        };
+        assert_eq!(event.pool_id, accounts[3]);
+    }
 }

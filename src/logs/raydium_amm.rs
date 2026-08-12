@@ -20,6 +20,53 @@ pub mod discriminators {
 /// Raydium AMM V4 程序 ID
 pub const PROGRAM_ID: &str = "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8";
 
+/// Decode the official bincode `ray_log` swap records emitted by AMM V4.
+#[inline]
+pub fn parse_ray_log_swap(log: &str, metadata: EventMetadata) -> Option<DexEvent> {
+    const PREFIX: &str = "ray_log: ";
+    let start = log.find(PREFIX)? + PREFIX.len();
+    let data = base64_simd::STANDARD
+        .decode_to_vec(log[start..].trim().as_bytes())
+        .ok()?;
+    if data.len() != 57 || !matches!(data[0], 3 | 4) {
+        return None;
+    }
+    let first = read_u64_le(&data, 1)?;
+    let second = read_u64_le(&data, 9)?;
+    let actual = read_u64_le(&data, 49)?;
+    let (amount_in, minimum_amount_out, max_amount_in, amount_out) = if data[0] == 3 {
+        (first, second, 0, actual)
+    } else {
+        (actual, 0, first, second)
+    };
+
+    Some(DexEvent::RaydiumAmmV4Swap(RaydiumAmmV4SwapEvent {
+        metadata,
+        amount_in,
+        minimum_amount_out,
+        max_amount_in,
+        amount_out,
+        token_program: Pubkey::default(),
+        amm: Pubkey::default(),
+        amm_authority: Pubkey::default(),
+        amm_open_orders: Pubkey::default(),
+        amm_target_orders: None,
+        pool_coin_token_account: Pubkey::default(),
+        pool_pc_token_account: Pubkey::default(),
+        serum_program: Pubkey::default(),
+        serum_market: Pubkey::default(),
+        serum_bids: Pubkey::default(),
+        serum_asks: Pubkey::default(),
+        serum_event_queue: Pubkey::default(),
+        serum_coin_vault_account: Pubkey::default(),
+        serum_pc_vault_account: Pubkey::default(),
+        serum_vault_signer: Pubkey::default(),
+        user_source_token_account: Pubkey::default(),
+        user_destination_token_account: Pubkey::default(),
+        user_source_owner: Pubkey::default(),
+    }))
+}
+
 /// 解析 Raydium AMM V4 日志
 #[inline]
 pub fn parse_log(
@@ -858,4 +905,38 @@ fn parse_withdraw_log_fallback(
         serum_bids: default_pubkey,
         serum_asks: default_pubkey,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+
+    fn ray_log(kind: u8, first: u64, second: u64, actual: u64) -> String {
+        let mut data = vec![0u8; 57];
+        data[0] = kind;
+        data[1..9].copy_from_slice(&first.to_le_bytes());
+        data[9..17].copy_from_slice(&second.to_le_bytes());
+        data[49..57].copy_from_slice(&actual.to_le_bytes());
+        format!("Program log: ray_log: {}", STANDARD.encode(data))
+    }
+
+    #[test]
+    fn parses_official_swap_in_and_swap_out_records() {
+        let event = parse_ray_log_swap(&ray_log(3, 100, 90, 95), EventMetadata::default())
+            .expect("base in");
+        let DexEvent::RaydiumAmmV4Swap(event) = event else {
+            panic!("unexpected event")
+        };
+        assert_eq!((event.amount_in, event.minimum_amount_out), (100, 90));
+        assert_eq!(event.amount_out, 95);
+
+        let event = parse_ray_log_swap(&ray_log(4, 110, 80, 75), EventMetadata::default())
+            .expect("base out");
+        let DexEvent::RaydiumAmmV4Swap(event) = event else {
+            panic!("unexpected event")
+        };
+        assert_eq!((event.max_amount_in, event.amount_out), (110, 80));
+        assert_eq!(event.amount_in, 75);
+    }
 }

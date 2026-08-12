@@ -195,6 +195,8 @@ let mut decoder = RawShredDecoder::new(RawShredConfig::default());
 - `ShredStreamConfig::high_throughput()` 增加接收缓冲、跟踪 slot 数和队列容量。
 - `ShredDecodeMode::JitoGrpc` 保留旧版 Entry gRPC 数据源，但使用相同的统一 `DexEvent` 解析器。
 - UDP 接收缓冲通过 `socket2` 请求，操作系统可能限制最终生效值。
+- Merkle FEC 恢复遵循 Agave wire 布局和 Jito 的门槛规则：只有收齐至少 `num_data_shreds` 个不重复 data/coding shard 后才尝试恢复。
+- Raw UDP 解码器没有 leader schedule，因此不执行 leader 签名验证。接收不可信 UDP 时应使用可信本地转发器，或在调用 `RawShredDecoder` 前完成 shred 验签。
 
 ## 解码基准测试
 

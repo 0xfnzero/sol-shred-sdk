@@ -9,6 +9,8 @@ use super::decoder::{entries_to_tx_batch, ShredEntryBatch, ShredTxBatch};
 use super::error::ShredResult;
 use super::reassembler::{RawShredDecoder, ShredDecoderStats};
 
+const MAX_DATAGRAMS_PER_POLL: usize = 64;
+
 /// Async UDP client for raw Solana shreds.
 pub struct RawShredClient {
     socket: UdpSocket,
@@ -46,14 +48,21 @@ impl RawShredClient {
         let mut buf = vec![0u8; self.config.max_datagram_size.max(1280)];
 
         loop {
-            let n = self.socket.recv(&mut buf).await?;
-            let now = Instant::now();
-            let batches = self.decoder.push_packet(&buf[..n], now);
-            self.decoder.evict_stale_slots(now);
-
-            for batch in batches {
-                callback(batch);
+            self.socket.readable().await?;
+            for _ in 0..MAX_DATAGRAMS_PER_POLL {
+                match self.socket.try_recv(&mut buf) {
+                    Ok(n) => {
+                        let now = Instant::now();
+                        for batch in self.decoder.push_packet(&buf[..n], now) {
+                            callback(batch);
+                        }
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
+                    Err(error) => return Err(error.into()),
+                }
             }
+            self.decoder.evict_stale_slots(Instant::now());
+            tokio::task::yield_now().await;
         }
     }
 

@@ -8,6 +8,7 @@ use solana_sdk::{pubkey::Pubkey, signature::Signature};
 
 /// Raydium CPMM discriminator 常量
 pub mod discriminators {
+    pub const SWAP_EVENT: [u8; 8] = [64, 198, 205, 232, 38, 8, 113, 226];
     pub const SWAP_BASE_IN: [u8; 8] = [143, 190, 90, 218, 196, 30, 51, 222];
     pub const SWAP_BASE_OUT: [u8; 8] = [55, 217, 98, 86, 163, 74, 180, 173];
     pub const CREATE_POOL: [u8; 8] = [233, 146, 209, 142, 207, 104, 64, 188];
@@ -56,6 +57,17 @@ fn parse_structured_log(
     let data = &program_data[8..];
 
     match discriminator {
+        discriminators::SWAP_EVENT => parse_swap_event_from_data(
+            data,
+            create_metadata_simple(
+                signature,
+                slot,
+                tx_index,
+                block_time_us,
+                Pubkey::default(),
+                grpc_recv_us,
+            ),
+        ),
         discriminators::SWAP_BASE_IN => {
             parse_swap_base_in_event(data, signature, slot, tx_index, block_time_us, grpc_recv_us)
         }
@@ -78,6 +90,42 @@ fn parse_structured_log(
 // =============================================================================
 // Public from_data parsers - Accept pre-decoded data, eliminate double decode
 // =============================================================================
+
+/// Parse the stable prefix of the current Anchor `SwapEvent` payload.
+#[inline(always)]
+pub fn parse_swap_event_from_data(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
+    if data.len() < 32 + (6 * 8) + 1 {
+        return None;
+    }
+    let mut offset = 0;
+    let pool_id = read_pubkey(data, offset)?;
+    offset += 32;
+    let input_vault_before = read_u64_le(data, offset)?;
+    offset += 8;
+    let output_vault_before = read_u64_le(data, offset)?;
+    offset += 8;
+    let input_amount = read_u64_le(data, offset)?;
+    offset += 8;
+    let output_amount = read_u64_le(data, offset)?;
+    offset += 8;
+    let input_transfer_fee = read_u64_le(data, offset)?;
+    offset += 8;
+    let output_transfer_fee = read_u64_le(data, offset)?;
+    offset += 8;
+    let base_input = read_bool(data, offset)?;
+
+    Some(DexEvent::RaydiumCpmmSwap(RaydiumCpmmSwapEvent {
+        metadata,
+        pool_id,
+        input_vault_before,
+        output_vault_before,
+        input_amount,
+        output_amount,
+        input_transfer_fee,
+        output_transfer_fee,
+        base_input,
+    }))
+}
 
 /// Parse Raydium CPMM SwapBaseIn event from pre-decoded data
 #[inline(always)]
@@ -781,4 +829,33 @@ fn parse_withdraw_from_text(
         token0_amount: extract_number_from_text(log, "token_0").unwrap_or(1_000_000_000),
         token1_amount: extract_number_from_text(log, "token_1").unwrap_or(1_000_000_000),
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_current_anchor_swap_event_prefix() {
+        let pool = Pubkey::new_unique();
+        let mut data = Vec::new();
+        data.extend_from_slice(pool.as_ref());
+        for value in 1u64..=6 {
+            data.extend_from_slice(&value.to_le_bytes());
+        }
+        data.push(1);
+
+        let event = parse_swap_event_from_data(&data, EventMetadata::default()).expect("swap");
+        let DexEvent::RaydiumCpmmSwap(event) = event else {
+            panic!("unexpected event")
+        };
+        assert_eq!(event.pool_id, pool);
+        assert_eq!(event.input_vault_before, 1);
+        assert_eq!(event.output_vault_before, 2);
+        assert_eq!(event.input_amount, 3);
+        assert_eq!(event.output_amount, 4);
+        assert_eq!(event.input_transfer_fee, 5);
+        assert_eq!(event.output_transfer_fee, 6);
+        assert!(event.base_input);
+    }
 }

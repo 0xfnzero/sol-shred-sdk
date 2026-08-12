@@ -26,6 +26,15 @@ use crate::core::events::*;
 /// - 预期开销 < 10ns
 #[inline(always)]
 pub fn merge_events(base: &mut DexEvent, inner: DexEvent) {
+    let _ = try_merge_events(base, inner);
+}
+
+/// Merge compatible variants and return an incompatible event untouched.
+///
+/// The incompatible event is boxed so the successful hot path does not carry
+/// the full `DexEvent` size in its `Result` stack frame.
+#[inline(always)]
+pub fn try_merge_events(base: &mut DexEvent, inner: DexEvent) -> Result<(), Box<DexEvent>> {
     use DexEvent::*;
 
     match (base, inner) {
@@ -141,10 +150,16 @@ pub fn merge_events(base: &mut DexEvent, inner: DexEvent) {
         (MeteoraDlmmSwap(b), MeteoraDlmmSwap(i)) => merge_generic(b, i),
         (MeteoraDlmmAddLiquidity(b), MeteoraDlmmAddLiquidity(i)) => merge_generic(b, i),
         (MeteoraDlmmRemoveLiquidity(b), MeteoraDlmmRemoveLiquidity(i)) => merge_generic(b, i),
-        (MeteoraDlmmInitializePool(b), MeteoraDlmmInitializePool(i)) => merge_generic(b, i),
+        (MeteoraDlmmInitializePool(b), MeteoraDlmmInitializePool(i)) => {
+            merge_dlmm_initialize_pool(b, i)
+        }
         (MeteoraDlmmInitializeBinArray(b), MeteoraDlmmInitializeBinArray(i)) => merge_generic(b, i),
-        (MeteoraDlmmCreatePosition(b), MeteoraDlmmCreatePosition(i)) => merge_generic(b, i),
-        (MeteoraDlmmClosePosition(b), MeteoraDlmmClosePosition(i)) => merge_generic(b, i),
+        (MeteoraDlmmCreatePosition(b), MeteoraDlmmCreatePosition(i)) => {
+            merge_dlmm_create_position(b, i)
+        }
+        (MeteoraDlmmClosePosition(b), MeteoraDlmmClosePosition(i)) => {
+            merge_dlmm_close_position(b, i)
+        }
         (MeteoraDlmmClaimFee(b), MeteoraDlmmClaimFee(i)) => merge_generic(b, i),
 
         // ========== RaydiumLaunchlab 系列 ==========
@@ -153,8 +168,10 @@ pub fn merge_events(base: &mut DexEvent, inner: DexEvent) {
         (RaydiumLaunchlabMigrateAmm(b), RaydiumLaunchlabMigrateAmm(i)) => merge_generic(b, i),
 
         // 其他组合不需要合并（类型不匹配）
-        _ => {}
+        (_, inner) => return Err(Box::new(inner)),
     }
+
+    Ok(())
 }
 
 /// 通用合并函数 - 对于大多数事件，inner instruction 包含完整数据
@@ -166,6 +183,40 @@ pub fn merge_events(base: &mut DexEvent, inner: DexEvent) {
 #[inline(always)]
 fn merge_generic<T>(base: &mut T, inner: T) {
     *base = inner;
+}
+
+#[inline(always)]
+fn merge_dlmm_initialize_pool(
+    base: &mut MeteoraDlmmInitializePoolEvent,
+    inner: MeteoraDlmmInitializePoolEvent,
+) {
+    let creator = base.creator;
+    let active_bin_id = base.active_bin_id;
+    *base = inner;
+    base.creator = creator;
+    base.active_bin_id = active_bin_id;
+}
+
+#[inline(always)]
+fn merge_dlmm_create_position(
+    base: &mut MeteoraDlmmCreatePositionEvent,
+    inner: MeteoraDlmmCreatePositionEvent,
+) {
+    let lower_bin_id = base.lower_bin_id;
+    let width = base.width;
+    *base = inner;
+    base.lower_bin_id = lower_bin_id;
+    base.width = width;
+}
+
+#[inline(always)]
+fn merge_dlmm_close_position(
+    base: &mut MeteoraDlmmClosePositionEvent,
+    inner: MeteoraDlmmClosePositionEvent,
+) {
+    let pool = base.pool;
+    *base = inner;
+    base.pool = pool;
 }
 
 // ============================================================================
@@ -888,6 +939,8 @@ fn merge_raydium_amm_v4_swap_log_preferred(
         &mut log.user_destination_token_account,
         ix.user_destination_token_account,
     );
+    fill_pk(&mut log.user_source_owner, ix.user_source_owner);
+    fill_pk(&mut log.amm, ix.amm);
 }
 
 #[inline]
@@ -939,7 +992,16 @@ fn merge_raydium_launchlab_pool_create_log_preferred(
     log: &mut RaydiumLaunchlabPoolCreateEvent,
     ix: RaydiumLaunchlabPoolCreateEvent,
 ) {
+    fill_pk(&mut log.payer, ix.payer);
     fill_pk(&mut log.creator, ix.creator);
+    fill_pk(&mut log.global_config, ix.global_config);
+    fill_pk(&mut log.platform_config, ix.platform_config);
+    fill_pk(&mut log.base_mint, ix.base_mint);
+    fill_pk(&mut log.quote_mint, ix.quote_mint);
+    fill_pk(&mut log.base_vault, ix.base_vault);
+    fill_pk(&mut log.quote_vault, ix.quote_vault);
+    fill_pk(&mut log.base_token_program, ix.base_token_program);
+    fill_pk(&mut log.quote_token_program, ix.quote_token_program);
     fill_str_if_empty(&mut log.base_mint_param.name, &ix.base_mint_param.name);
     fill_str_if_empty(&mut log.base_mint_param.symbol, &ix.base_mint_param.symbol);
     fill_str_if_empty(&mut log.base_mint_param.uri, &ix.base_mint_param.uri);
@@ -955,12 +1017,22 @@ fn merge_raydium_launchlab_migrate_amm_log_preferred(
     fill_pk(&mut log.user, ix.user);
 }
 
-/// RaydiumLaunchlabTrade 当前无独立「仅 ix 账户」字段；保留占位以便与 dedup 对齐，日后扩展。
 #[inline]
 fn merge_raydium_launchlab_trade_log_preferred(
-    _log: &mut RaydiumLaunchlabTradeEvent,
-    _ix: RaydiumLaunchlabTradeEvent,
+    log: &mut RaydiumLaunchlabTradeEvent,
+    ix: RaydiumLaunchlabTradeEvent,
 ) {
+    fill_pk(&mut log.user, ix.user);
+    fill_pk(&mut log.global_config, ix.global_config);
+    fill_pk(&mut log.platform_config, ix.platform_config);
+    fill_pk(&mut log.user_base_token, ix.user_base_token);
+    fill_pk(&mut log.user_quote_token, ix.user_quote_token);
+    fill_pk(&mut log.base_vault, ix.base_vault);
+    fill_pk(&mut log.quote_vault, ix.quote_vault);
+    fill_pk(&mut log.base_mint, ix.base_mint);
+    fill_pk(&mut log.quote_mint, ix.quote_mint);
+    fill_pk(&mut log.base_token_program, ix.base_token_program);
+    fill_pk(&mut log.quote_token_program, ix.quote_token_program);
 }
 
 #[inline]
@@ -1186,6 +1258,68 @@ mod tests {
     }
 
     #[test]
+    fn dlmm_position_event_keeps_instruction_only_fields() {
+        let pool = Pubkey::new_unique();
+        let position = Pubkey::new_unique();
+        let owner = Pubkey::new_unique();
+        let mut base = DexEvent::MeteoraDlmmCreatePosition(MeteoraDlmmCreatePositionEvent {
+            metadata: EventMetadata::default(),
+            pool,
+            position,
+            owner,
+            lower_bin_id: -42,
+            width: 70,
+        });
+        let inner = DexEvent::MeteoraDlmmCreatePosition(MeteoraDlmmCreatePositionEvent {
+            metadata: EventMetadata::default(),
+            pool,
+            position,
+            owner,
+            lower_bin_id: 0,
+            width: 0,
+        });
+
+        assert!(try_merge_events(&mut base, inner).is_ok());
+        let DexEvent::MeteoraDlmmCreatePosition(event) = base else {
+            panic!("position")
+        };
+        assert_eq!(event.lower_bin_id, -42);
+        assert_eq!(event.width, 70);
+    }
+
+    #[test]
+    fn incompatible_merge_returns_inner_event() {
+        let mut base = DexEvent::MeteoraDlmmSwap(MeteoraDlmmSwapEvent {
+            metadata: EventMetadata::default(),
+            pool: Pubkey::default(),
+            from: Pubkey::default(),
+            start_bin_id: 0,
+            end_bin_id: 0,
+            amount_in: 0,
+            amount_out: 0,
+            swap_for_y: false,
+            fee: 0,
+            protocol_fee: 0,
+            fee_bps: 0,
+            host_fee: 0,
+        });
+        let inner = DexEvent::MeteoraDlmmAddLiquidity(MeteoraDlmmAddLiquidityEvent {
+            metadata: EventMetadata::default(),
+            pool: Pubkey::default(),
+            from: Pubkey::default(),
+            position: Pubkey::default(),
+            amounts: [0; 2],
+            active_bin_id: 0,
+        });
+
+        assert!(matches!(
+            try_merge_events(&mut base, inner),
+            Err(inner) if matches!(*inner, DexEvent::MeteoraDlmmAddLiquidity(_))
+        ));
+        assert!(matches!(base, DexEvent::MeteoraDlmmSwap(_)));
+    }
+
+    #[test]
     fn merge_replaces_sol_quote_sentinel_with_real_quote_mint() {
         let quote_mint = Pubkey::new_unique();
         let mut base = DexEvent::PumpFunTrade(PumpFunTradeEvent {
@@ -1323,5 +1457,48 @@ mod tests {
             }
             _ => panic!("variant preserved"),
         }
+    }
+
+    #[test]
+    fn grpc_launchlab_merge_keeps_log_amounts_and_fills_quote_context() {
+        let quote_mint = Pubkey::new_unique();
+        let mut log_event = DexEvent::RaydiumLaunchlabTrade(RaydiumLaunchlabTradeEvent {
+            metadata: EventMetadata::default(),
+            pool_state: Pubkey::new_unique(),
+            user: Pubkey::default(),
+            amount_in: 100,
+            amount_out: 200,
+            is_buy: true,
+            trade_direction: TradeDirection::Buy,
+            exact_in: true,
+            global_config: Pubkey::default(),
+            platform_config: Pubkey::default(),
+            user_base_token: Pubkey::default(),
+            user_quote_token: Pubkey::default(),
+            base_vault: Pubkey::default(),
+            quote_vault: Pubkey::default(),
+            base_mint: Pubkey::default(),
+            quote_mint: Pubkey::default(),
+            base_token_program: Pubkey::default(),
+            quote_token_program: Pubkey::default(),
+        });
+        let DexEvent::RaydiumLaunchlabTrade(log) = &log_event else {
+            unreachable!();
+        };
+        let instruction_event = DexEvent::RaydiumLaunchlabTrade(RaydiumLaunchlabTradeEvent {
+            amount_in: 999,
+            amount_out: 888,
+            quote_mint,
+            ..log.clone()
+        });
+
+        merge_grpc_instruction_into_log(&mut log_event, instruction_event);
+
+        let DexEvent::RaydiumLaunchlabTrade(event) = log_event else {
+            unreachable!();
+        };
+        assert_eq!(event.amount_in, 100);
+        assert_eq!(event.amount_out, 200);
+        assert_eq!(event.quote_mint, quote_mint);
     }
 }

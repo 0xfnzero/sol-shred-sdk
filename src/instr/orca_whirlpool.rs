@@ -125,8 +125,11 @@ pub fn parse_instruction(
     let data = &instruction_data[8..];
 
     match instruction_type {
-        OrcaWhirlpoolInstruction::Swap | OrcaWhirlpoolInstruction::SwapV2 => {
-            parse_swap_instruction(data, accounts, signature, slot, tx_index, block_time_us)
+        OrcaWhirlpoolInstruction::Swap => {
+            parse_swap_instruction(data, accounts, 2, signature, slot, tx_index, block_time_us)
+        }
+        OrcaWhirlpoolInstruction::SwapV2 => {
+            parse_swap_instruction(data, accounts, 4, signature, slot, tx_index, block_time_us)
         }
         OrcaWhirlpoolInstruction::IncreaseLiquidity
         | OrcaWhirlpoolInstruction::IncreaseLiquidityV2 => parse_increase_liquidity_instruction(
@@ -164,6 +167,7 @@ pub fn parse_instruction(
 fn parse_swap_instruction(
     data: &[u8],
     accounts: &[Pubkey],
+    whirlpool_index: usize,
     signature: Signature,
     slot: u64,
     tx_index: u64,
@@ -185,7 +189,7 @@ fn parse_swap_instruction(
 
     let a_to_b = read_bool(data, offset)?;
 
-    let whirlpool = get_account(accounts, 1)?;
+    let whirlpool = get_account(accounts, whirlpool_index)?;
     let metadata = create_metadata_simple(signature, slot, tx_index, block_time_us, whirlpool);
 
     Some(DexEvent::OrcaWhirlpoolSwap(OrcaWhirlpoolSwapEvent {
@@ -341,4 +345,43 @@ fn parse_initialize_pool_instruction(
             initial_sqrt_price,
         },
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn swap_data(discriminator: [u8; 8]) -> Vec<u8> {
+        let mut data = Vec::with_capacity(42);
+        data.extend_from_slice(&discriminator);
+        data.extend_from_slice(&100u64.to_le_bytes());
+        data.extend_from_slice(&90u64.to_le_bytes());
+        data.extend_from_slice(&1u128.to_le_bytes());
+        data.push(1);
+        data.push(0);
+        data
+    }
+
+    #[test]
+    fn swap_versions_use_current_whirlpool_indices() {
+        let accounts: Vec<_> = (0..5).map(|_| Pubkey::new_unique()).collect();
+        for (discriminator, expected_pool) in [
+            (discriminators::SWAP, accounts[2]),
+            (discriminators::SWAP_V2, accounts[4]),
+        ] {
+            let event = parse_instruction(
+                &swap_data(discriminator),
+                &accounts,
+                Signature::default(),
+                1,
+                0,
+                None,
+            )
+            .expect("swap");
+            let DexEvent::OrcaWhirlpoolSwap(event) = event else {
+                panic!("unexpected event")
+            };
+            assert_eq!(event.whirlpool, expected_pool);
+        }
+    }
 }

@@ -96,6 +96,16 @@ pub fn parse_trade_from_data(data: &[u8], metadata: EventMetadata) -> Option<Dex
                 TradeDirection::Sell
             },
             exact_in,
+            global_config: Pubkey::default(),
+            platform_config: Pubkey::default(),
+            user_base_token: Pubkey::default(),
+            user_quote_token: Pubkey::default(),
+            base_vault: Pubkey::default(),
+            quote_vault: Pubkey::default(),
+            base_mint: Pubkey::default(),
+            quote_mint: Pubkey::default(),
+            base_token_program: Pubkey::default(),
+            quote_token_program: Pubkey::default(),
         },
     ))
 }
@@ -117,7 +127,16 @@ pub fn parse_pool_create_from_data(data: &[u8], metadata: EventMetadata) -> Opti
             metadata,
             base_mint_param,
             pool_state,
+            payer: Pubkey::default(),
             creator,
+            global_config: Pubkey::default(),
+            platform_config: Pubkey::default(),
+            base_mint: Pubkey::default(),
+            quote_mint: Pubkey::default(),
+            base_vault: Pubkey::default(),
+            quote_vault: Pubkey::default(),
+            base_token_program: Pubkey::default(),
+            quote_token_program: Pubkey::default(),
         },
     ))
 }
