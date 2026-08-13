@@ -72,9 +72,28 @@ Raw shred 订阅直接从 `Entry` 交易解析交易中可见的指令数据。S
 
 ## 安装
 
+### 直接克隆
+
+将此项目克隆到您的项目目录：
+
+```bash
+cd your_project_root_directory
+git clone https://github.com/0xfnzero/sol-shred-sdk
+```
+
+在您的 `Cargo.toml` 中添加依赖：
+
 ```toml
+# 添加到您的 Cargo.toml
+sol-shred-sdk = { path = "./sol-shred-sdk", version = "3.0.3" }
+```
+
+### 使用 crates.io
+
+```toml
+# 添加到您的 Cargo.toml
 [dependencies]
-sol-shred-sdk = "3.0.2"
+sol-shred-sdk = "3.0.3"
 ```
 
 ## PumpSwap 有效 Quote Reserves

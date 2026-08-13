@@ -75,9 +75,28 @@ payloads by themselves.
 
 ## Installation
 
+### Direct Clone
+
+Clone this project to your project directory:
+
+```bash
+cd your_project_root_directory
+git clone https://github.com/0xfnzero/sol-shred-sdk
+```
+
+Add the dependency to your `Cargo.toml`:
+
 ```toml
+# Add to your Cargo.toml
+sol-shred-sdk = { path = "./sol-shred-sdk", version = "3.0.3" }
+```
+
+### Use crates.io
+
+```toml
+# Add to your Cargo.toml
 [dependencies]
-sol-shred-sdk = "3.0.2"
+sol-shred-sdk = "3.0.3"
 ```
 
 ## PumpSwap Effective Quote Reserves
