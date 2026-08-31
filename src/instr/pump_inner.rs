@@ -90,17 +90,12 @@ unsafe fn read_pubkey_unchecked(data: &[u8], offset: usize) -> solana_sdk::pubke
 #[cfg(feature = "parse-zero-copy")]
 #[inline(always)]
 unsafe fn read_str_unchecked(data: &[u8], offset: usize) -> Option<(&str, usize)> {
-    if data.len() < offset + 4 {
-        return None;
-    }
-
+    let content_offset = offset.checked_add(4)?;
+    data.get(offset..content_offset)?;
     let len = read_u32_unchecked(data, offset) as usize;
-    if data.len() < offset + 4 + len {
-        return None;
-    }
-
-    let string_bytes = &data[offset + 4..offset + 4 + len];
-    let s = std::str::from_utf8_unchecked(string_bytes);
+    let end = content_offset.checked_add(len)?;
+    let string_bytes = data.get(content_offset..end)?;
+    let s = std::str::from_utf8(string_bytes).ok()?;
     Some((s, 4 + len))
 }
 
@@ -758,6 +753,13 @@ mod tests {
         // 验证 discriminator 匹配
         let disc = discriminators::TRADE_EVENT;
         assert_eq!(disc.len(), 16);
+    }
+
+    #[cfg(feature = "parse-zero-copy")]
+    #[test]
+    fn string_reader_rejects_invalid_utf8() {
+        let data = [1, 0, 0, 0, 0xff];
+        assert!(unsafe { read_str_unchecked(&data, 0) }.is_none());
     }
 
     #[test]

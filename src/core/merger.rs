@@ -1389,7 +1389,7 @@ mod tests {
         // 不同 signature 不能合并
         let different_sig = DexEvent::PumpFunTrade(PumpFunTradeEvent {
             metadata: EventMetadata {
-                signature: Signature::new_unique(),
+                signature: Signature::from([1_u8; 64]),
                 ..metadata
             },
             ..Default::default()

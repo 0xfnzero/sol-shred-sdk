@@ -2,7 +2,7 @@
 
 use std::str::FromStr;
 
-use solana_client::nonblocking::rpc_client::RpcClient;
+use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::pubkey::Pubkey;
 
 use super::utils::user_wallet_pubkey_for_onchain_account;

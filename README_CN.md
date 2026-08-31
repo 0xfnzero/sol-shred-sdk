@@ -45,7 +45,7 @@ UDP packet -> Solana/Agave Shred -> FEC recovery -> deshred -> Entry -> Versione
 | 方向 | 覆盖范围 |
 |------|----------|
 | 输入 | 原始 Solana UDP Shred payload，或 Jito 风格 ShredStream gRPC Entry |
-| 解码 | `ShredDecodeMode::RawUdp` 使用 `solana-ledger` 解析 Shred、Reed-Solomon 恢复、`Shredder::deshred` 和 bincode `Vec<Entry>` 解码；`ShredDecodeMode::JitoGrpc` 接收预构建 Entry batch |
+| 解码 | `ShredDecodeMode::RawUdp` 使用 `solana-ledger` 解析 Shred、Reed-Solomon 恢复、`Shredder::deshred` 和 wincode `Vec<Entry>` 解码；`ShredDecodeMode::JitoGrpc` 接收预构建 Entry batch |
 | 交易 | 带 slot 上下文的 Entry 到交易展开 |
 | 事件 | 从 `sol-parser-sdk` ShredStream 路径迁移的 `DexEvent` 解析器 |
 | 扩展 | 通过 `TransactionEventParser` trait 接入自定义解析器 |
@@ -85,7 +85,7 @@ git clone https://github.com/0xfnzero/sol-shred-sdk
 
 ```toml
 # 添加到您的 Cargo.toml
-sol-shred-sdk = { path = "./sol-shred-sdk", version = "3.0.3" }
+sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.0" }
 ```
 
 ### 使用 crates.io
@@ -93,7 +93,7 @@ sol-shred-sdk = { path = "./sol-shred-sdk", version = "3.0.3" }
 ```toml
 # 添加到您的 Cargo.toml
 [dependencies]
-sol-shred-sdk = "3.0.3"
+sol-shred-sdk = "4.0.0"
 ```
 
 ## PumpSwap 有效 Quote Reserves
@@ -228,7 +228,7 @@ RAW_SHRED_BENCH_ITERS=10000 cargo test --release --lib bench_decode_generated_sh
 当前本地参考结果：
 
 ```text
-packets_per_sec=1172196 slots_per_sec=36631 tx_per_sec=1172196
+packets_per_sec=3276089 slots_per_sec=102378 tx_per_sec=3276089
 ```
 
 ## 许可证

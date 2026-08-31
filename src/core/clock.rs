@@ -10,8 +10,8 @@
 //! ## 性能优势
 //!
 //! - **减少 90%+ 开销**: 从系统调用（1-2μs）降低到内存计算（10-50ns）
-//! - **自动校准**: 每 5 分钟自动校准一次，防止时钟漂移
-//! - **线程安全**: 使用 `OnceCell` 实现全局单例
+//! - **可选校准**: 可变时钟可按配置周期校准，防止时钟漂移
+//! - **线程安全**: 使用 `OnceLock` 实现全局单例
 //!
 //! ## 使用示例
 //!
@@ -28,7 +28,15 @@
 //! println!("解析耗时: {} μs", elapsed);
 //! ```
 
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
+
+#[inline]
+fn system_time_micros() -> i64 {
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(duration) => i64::try_from(duration.as_micros()).unwrap_or(i64::MAX),
+        Err(error) => -i64::try_from(error.duration().as_micros()).unwrap_or(i64::MAX),
+    }
+}
 
 /// 高性能时钟管理器
 ///
@@ -62,12 +70,12 @@ impl HighPerformanceClock {
         // 通过多次采样来减少初始化误差
         let mut best_offset = i64::MAX;
         let mut best_instant = Instant::now();
-        let mut best_timestamp = chrono::Utc::now().timestamp_micros();
+        let mut best_timestamp = system_time_micros();
 
         // 进行 3 次采样，选择延迟最小的
         for _ in 0..3 {
             let instant_before = Instant::now();
-            let timestamp = chrono::Utc::now().timestamp_micros();
+            let timestamp = system_time_micros();
             let instant_after = Instant::now();
 
             let sample_latency = instant_after.duration_since(instant_before).as_nanos() as i64;
@@ -120,7 +128,7 @@ impl HighPerformanceClock {
     /// - 如果漂移超过 1ms，重新设置基准
     fn recalibrate(&mut self) {
         let current_monotonic = Instant::now();
-        let current_utc = chrono::Utc::now().timestamp_micros();
+        let current_utc = system_time_micros();
 
         // 计算预期的 UTC 时间戳（基于单调时钟）
         let expected_utc = self.base_timestamp_us
@@ -172,8 +180,7 @@ impl Default for HighPerformanceClock {
 }
 
 /// 全局高性能时钟实例
-static HIGH_PERF_CLOCK: once_cell::sync::OnceCell<HighPerformanceClock> =
-    once_cell::sync::OnceCell::new();
+static HIGH_PERF_CLOCK: std::sync::OnceLock<HighPerformanceClock> = std::sync::OnceLock::new();
 
 /// 获取当前时间戳（微秒）
 ///
@@ -253,8 +260,8 @@ pub fn now_us() -> i64 {
             tv_sec: 0,
             tv_nsec: 0,
         };
-        unsafe {
-            libc::clock_gettime(clock_id, &mut ts);
+        if unsafe { libc::clock_gettime(clock_id, &mut ts) } != 0 {
+            return now_micros();
         }
         ts.tv_sec * 1_000_000 + ts.tv_nsec / 1_000
     }
@@ -264,29 +271,42 @@ pub fn now_us() -> i64 {
 mod tests {
     use super::*;
     use std::thread;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
+
+    fn assert_matches_wall_clock(elapsed_us: i64, wall_elapsed: Duration) {
+        let wall_us = i64::try_from(wall_elapsed.as_micros()).expect("test duration fits in i64");
+        let drift_us = elapsed_us.abs_diff(wall_us);
+        assert!(
+            drift_us <= 5_000,
+            "clock elapsed {elapsed_us} us differs from wall elapsed {wall_us} us"
+        );
+    }
 
     #[test]
     fn test_high_performance_clock_basic() {
         let clock = HighPerformanceClock::new();
         let t1 = clock.now_micros();
+        let wall_start = Instant::now();
         thread::sleep(Duration::from_millis(10));
+        let wall_elapsed = wall_start.elapsed();
         let t2 = clock.now_micros();
 
         let elapsed = t2 - t1;
-        assert!(elapsed >= 10_000, "elapsed: {} μs", elapsed); // 至少 10ms
-        assert!(elapsed < 20_000, "elapsed: {} μs", elapsed); // 不超过 20ms
+        assert!(elapsed >= 10_000, "elapsed: {} μs", elapsed);
+        assert_matches_wall_clock(elapsed, wall_elapsed);
     }
 
     #[test]
     fn test_elapsed_micros_since() {
         let clock = HighPerformanceClock::new();
         let start = clock.now_micros();
+        let wall_start = Instant::now();
         thread::sleep(Duration::from_millis(5));
+        let wall_elapsed = wall_start.elapsed();
         let elapsed = clock.elapsed_micros_since(start);
 
         assert!(elapsed >= 5_000, "elapsed: {} μs", elapsed);
-        assert!(elapsed < 10_000, "elapsed: {} μs", elapsed);
+        assert_matches_wall_clock(elapsed, wall_elapsed);
     }
 
     #[test]
@@ -302,11 +322,13 @@ mod tests {
     #[test]
     fn test_elapsed_global() {
         let start = now_micros();
+        let wall_start = Instant::now();
         thread::sleep(Duration::from_millis(2));
+        let wall_elapsed = wall_start.elapsed();
         let elapsed = elapsed_micros_since(start);
 
         assert!(elapsed >= 2_000, "elapsed: {} μs", elapsed);
-        assert!(elapsed < 5_000, "elapsed: {} μs", elapsed);
+        assert_matches_wall_clock(elapsed, wall_elapsed);
     }
 
     #[test]

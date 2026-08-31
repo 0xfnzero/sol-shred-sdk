@@ -1,24 +1,49 @@
-use crate::common::error::ClientResult;
+use crate::common::error::{ClientError, ClientResult};
 use crate::common::logs_data::{DexInstruction, TradeType};
 use crate::common::logs_parser::{
     parse_bonk_trade_data, parse_create_token_data, parse_instruction_bonk_create_token_data,
     parse_instruction_create_token_data, parse_instruction_trade_data, parse_trade_data,
 };
+use crate::instr::program_ids::{PUMPFUN_PROGRAM_ID, RAYDIUM_LAUNCHLAB_PROGRAM_ID};
 pub struct LogFilter;
 use crate::shredstream::SubscribeTransactionsResponse;
-use bs58;
 use solana_sdk::instruction::CompiledInstruction as SolanaCompiledInstruction;
 use solana_sdk::pubkey::Pubkey;
-use std::str::FromStr;
 
 use solana_sdk::transaction::VersionedTransaction;
 
+const COMPUTE_BUDGET_PROGRAM_ID: Pubkey =
+    solana_sdk::pubkey!("ComputeBudget111111111111111111111111111111");
+const SYSTEM_PROGRAM_ID: Pubkey = solana_sdk::pubkey!("11111111111111111111111111111111");
+const PUMPFUN_INVOKE_LOG: &str = "Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P invoke";
+const PUMPFUN_SUCCESS_LOG: &str = "Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P success";
+const JITO_TIP_ACCOUNTS: [Pubkey; 8] = [
+    solana_sdk::pubkey!("HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe"),
+    solana_sdk::pubkey!("3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT"),
+    solana_sdk::pubkey!("ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt"),
+    solana_sdk::pubkey!("DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh"),
+    solana_sdk::pubkey!("DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL"),
+    solana_sdk::pubkey!("96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5"),
+    solana_sdk::pubkey!("Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY"),
+    solana_sdk::pubkey!("ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49"),
+];
+const SOLT0_TIP_ACCOUNTS: [Pubkey; 10] = [
+    solana_sdk::pubkey!("DiTmWENJsHQdawVUUKnUXkconcpW4Jv52TnMWhkncF6t"),
+    solana_sdk::pubkey!("HRyRhQ86t3H4aAtgvHVpUJmw64BDrb61gRiKcdKUXs5c"),
+    solana_sdk::pubkey!("7y4whZmw388w1ggjToDLSBLv47drw5SUXcLk6jtmwixd"),
+    solana_sdk::pubkey!("J9BMEWFbCBEjtQ1fG5Lo9kouX1HfrKQxeUxetwXrifBw"),
+    solana_sdk::pubkey!("8U1JPQh3mVQ4F5jwRdFTBzvNRQaYFQppHQYoH38DJGSQ"),
+    solana_sdk::pubkey!("Eb2KpSC8uMt9GmzyAEm5Eb1AAAgTjRaXWFjKyFXHZxF3"),
+    solana_sdk::pubkey!("FCjUJZ1qozm1e8romw216qyfQMaaWKxWsuySnumVCCNe"),
+    solana_sdk::pubkey!("ENxTEjSQ1YabmUpXAdCgevnHQ9MHdLv8tzFiuiYJqa13"),
+    solana_sdk::pubkey!("6rYLG55Q9RpsPGvqdPNJs4z5WTxJVatMB8zV3WJhs5EK"),
+    solana_sdk::pubkey!("Cix2bHfqPcKcM233mzxbLk14kSggUUiz2A87fJtGivXr"),
+];
+
 impl LogFilter {
-    const PROGRAM_ID: &'static str = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
     pub const CREATE_TOKEN_IX: &[u8] = &[24, 30, 200, 40, 5, 28, 7, 119];
     pub const BUY_IX: &[u8] = &[102, 6, 61, 18, 1, 218, 235, 234];
     pub const SELL_IX: &[u8] = &[51, 230, 133, 164, 1, 127, 131, 173];
-    const PROGRAM_ID_2: &'static str = "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj";
     pub const BUY_EXACT_IN: &[u8] = &[250, 234, 13, 123, 213, 156, 19, 236];
     pub const BUY_EXACT_OUT: &[u8] = &[24, 211, 116, 40, 105, 3, 153, 56];
     pub const SELL_EXACT_IN: &[u8] = &[149, 39, 222, 155, 211, 124, 152, 26];
@@ -33,8 +58,7 @@ impl LogFilter {
     ) -> ClientResult<Vec<DexInstruction>> {
         let compiled_instructions = versioned_tx.message.instructions();
         let accounts = versioned_tx.message.static_account_keys();
-        let program_id = Pubkey::from_str(Self::PROGRAM_ID).unwrap_or_default();
-        let pump_index = accounts.iter().position(|key| key == &program_id);
+        let pump_index = accounts.iter().position(|key| key == &PUMPFUN_PROGRAM_ID);
         let mut instructions: Vec<DexInstruction> = Vec::new();
         if let Some(index) = pump_index {
             for instruction in compiled_instructions {
@@ -63,8 +87,7 @@ impl LogFilter {
                                 parse_instruction_trade_data(instruction, accounts, true)
                             {
                                 if let Some(bot_wallet_pubkey) = bot_wallet {
-                                    if trade_info.user.to_string() == bot_wallet_pubkey.to_string()
-                                    {
+                                    if trade_info.user == bot_wallet_pubkey {
                                         instructions.push(DexInstruction::BotTrade(trade_info));
                                     } else {
                                         instructions.push(DexInstruction::UserTrade(trade_info));
@@ -74,31 +97,29 @@ impl LogFilter {
                                 }
                             };
                         }
-                        // sell
-                        // Some(Self::SELL_IX) if instruction.data.len() == 24 && instruction.accounts.len() >= 12 => {
-                        //     if let Ok(trade_info) = parse_instruction_trade_data(instruction, accounts, false) {
-                        //         if let Some(bot_wallet_pubkey) = bot_wallet {
-                        //             if trade_info.user.to_string() == bot_wallet_pubkey.to_string() {
-                        //                 instructions.push(DexInstruction::BotTrade(trade_info));
-                        //             } else {
-                        //                 instructions.push(DexInstruction::UserTrade(trade_info));
-                        //             }
-                        //         } else {
-                        //             instructions.push(DexInstruction::UserTrade(trade_info));
-                        //         }
-                        //     };
-                        // }
+                        Some(Self::SELL_IX)
+                            if instruction.data.len() == 24 && instruction.accounts.len() >= 12 =>
+                        {
+                            if let Ok(trade_info) =
+                                parse_instruction_trade_data(instruction, accounts, false)
+                            {
+                                if bot_wallet == Some(trade_info.user) {
+                                    instructions.push(DexInstruction::BotTrade(trade_info));
+                                } else {
+                                    instructions.push(DexInstruction::UserTrade(trade_info));
+                                }
+                            }
+                        }
                         _ => {}
                     }
                 }
             }
         }
 
-        let program_id_2 = Pubkey::from_str(Self::PROGRAM_ID_2).unwrap_or_default();
-        let pump_index_2 = accounts.iter().position(|key| key == &program_id_2);
+        let pump_index_2 = accounts
+            .iter()
+            .position(|key| key == &RAYDIUM_LAUNCHLAB_PROGRAM_ID);
         if let Some(index) = pump_index_2 {
-            let signature = versioned_tx.signatures[0].to_string();
-            // println!("发现bonk交易hash: {}", signature);
             for instruction in compiled_instructions {
                 if instruction.program_id_index as usize == index {
                     let all_accounts_valid = instruction
@@ -115,14 +136,13 @@ impl LogFilter {
                     }
 
                     match instruction.data.get(0..8) {
-                        Some(Self::INITIALIZE) => {
-                            println!("匹配到BONK创建代币指令! signature: {}", signature);
+                        Some(Self::INITIALIZE) | Some(Self::INITIALIZE_V2) => {
                             match parse_instruction_bonk_create_token_data(instruction, accounts) {
                                 Ok(token_info) => {
                                     instructions.push(DexInstruction::BonkCreateToken(token_info));
                                 }
                                 Err(e) => {
-                                    println!("解析BONK创建代币失败: {:?}", e);
+                                    log::debug!("failed to parse Raydium LaunchLab create: {e}");
                                 }
                             }
                         }
@@ -160,125 +180,102 @@ impl LogFilter {
 
     fn convert_proto_instruction(
         proto_ix: &crate::shredstream::CompiledInstruction,
-    ) -> SolanaCompiledInstruction {
-        SolanaCompiledInstruction {
-            program_id_index: proto_ix.program_id_index as u8,
+    ) -> ClientResult<SolanaCompiledInstruction> {
+        Ok(SolanaCompiledInstruction {
+            program_id_index: u8::try_from(proto_ix.program_id_index).map_err(|_| {
+                ClientError::InvalidData(format!(
+                    "program id index {} exceeds u8 range",
+                    proto_ix.program_id_index
+                ))
+            })?,
             accounts: proto_ix.accounts.clone(),
             data: proto_ix.data.clone(),
-        }
+        })
     }
+
+    fn parse_proto_pubkeys(accounts: &[Vec<u8>]) -> ClientResult<Vec<Pubkey>> {
+        accounts
+            .iter()
+            .enumerate()
+            .map(|(index, key_bytes)| {
+                let bytes: [u8; 32] = key_bytes.as_slice().try_into().map_err(|_| {
+                    ClientError::InvalidData(format!(
+                        "account key {index} has length {}, expected 32",
+                        key_bytes.len()
+                    ))
+                })?;
+                Ok(Pubkey::new_from_array(bytes))
+            })
+            .collect()
+    }
+
     pub fn parse_compiled_instruction_shreder(
         tx_info: &SubscribeTransactionsResponse,
     ) -> ClientResult<Vec<DexInstruction>> {
-        let compiled_instructions = &tx_info
+        let transaction_update = tx_info
             .transaction
             .as_ref()
-            .unwrap()
+            .ok_or_else(|| ClientError::InvalidData("missing transaction update".to_string()))?;
+        let transaction = transaction_update
             .transaction
             .as_ref()
-            .unwrap()
+            .ok_or_else(|| ClientError::InvalidData("missing transaction".to_string()))?;
+        let message = transaction
             .message
             .as_ref()
-            .unwrap()
-            .instructions;
-        let mut accounts = tx_info
-            .transaction
-            .as_ref()
-            .unwrap()
-            .transaction
-            .as_ref()
-            .unwrap()
-            .message
-            .as_ref()
-            .unwrap()
-            .account_keys
-            .clone();
-        let address_table_lookups = &tx_info
-            .transaction
-            .as_ref()
-            .unwrap()
-            .transaction
-            .as_ref()
-            .unwrap()
-            .message
-            .as_ref()
-            .unwrap()
-            .address_table_lookups;
-        for lookup in address_table_lookups {
-            accounts.push(lookup.account_key.clone());
-        }
-        // let tx_signature = bs58::encode(&tx_info.signature).into_string();
-        let tx_signature = bs58::encode(
-            &tx_info
-                .transaction
-                .as_ref()
-                .unwrap()
-                .transaction
-                .as_ref()
-                .unwrap()
-                .signatures[0],
-        )
-        .into_string();
-
-        // let pump_index = accounts.iter().position(|key| key == &program_id);
+            .ok_or_else(|| ClientError::InvalidData("missing transaction message".to_string()))?;
+        let compiled_instructions = &message.instructions;
+        let accounts = &message.account_keys;
+        let accounts_pubkeys = Self::parse_proto_pubkeys(accounts)?;
         let mut instructions: Vec<DexInstruction> = Vec::new();
-        for instruction in compiled_instructions {
-            let all_accounts_valid = instruction
-                .accounts
-                .iter()
-                .all(|&acc_idx| (acc_idx as usize) < accounts.len());
-            if !all_accounts_valid {
-                continue;
-            }
-            let solana_ix = Self::convert_proto_instruction(instruction);
-            // 转换账户类型
-            let accounts_pubkeys: Vec<Pubkey> = accounts
-                .iter()
-                .map(|key_bytes| {
-                    let mut array = [0u8; 32];
-                    let len = std::cmp::min(key_bytes.len(), 32);
-                    array[..len].copy_from_slice(&key_bytes[..len]);
-                    Pubkey::new_from_array(array)
-                })
-                .collect();
-            match instruction.data.get(0..8) {
-                // create
-                Some(Self::CREATE_TOKEN_IX) => {
-                    // println!("匹配到创建代币指令! signature: {}", tx_signature);
-                    if let Ok(token_info) =
-                        parse_instruction_create_token_data(&solana_ix, &accounts_pubkeys)
-                    {
-                        instructions.push(DexInstruction::CreateToken(token_info));
-                    };
-                }
-                // buy
-                Some(Self::BUY_IX) if instruction.accounts.len() > 7 => {
-                    if let Ok(trade_info) =
-                        parse_instruction_trade_data(&solana_ix, &accounts_pubkeys, true)
-                    {
-                        instructions.push(DexInstruction::UserTrade(trade_info));
-                    };
-                }
-                // sell
-                Some(Self::SELL_IX)
-                    if instruction.data.len() == 24 && instruction.accounts.len() >= 12 =>
+        if let Some(pump_index) = accounts_pubkeys
+            .iter()
+            .position(|key| key == &PUMPFUN_PROGRAM_ID)
+        {
+            for instruction in compiled_instructions {
+                if usize::try_from(instruction.program_id_index).ok() != Some(pump_index)
+                    || !instruction
+                        .accounts
+                        .iter()
+                        .all(|&account_index| usize::from(account_index) < accounts.len())
                 {
-                    if let Ok(trade_info) =
-                        parse_instruction_trade_data(&solana_ix, &accounts_pubkeys, false)
-                    {
-                        instructions.push(DexInstruction::UserTrade(trade_info));
-                    };
+                    continue;
                 }
-                _ => {}
+
+                let solana_ix = Self::convert_proto_instruction(instruction)?;
+                match instruction.data.get(0..8) {
+                    Some(Self::CREATE_TOKEN_IX) => {
+                        if let Ok(token_info) =
+                            parse_instruction_create_token_data(&solana_ix, &accounts_pubkeys)
+                        {
+                            instructions.push(DexInstruction::CreateToken(token_info));
+                        }
+                    }
+                    Some(Self::BUY_IX) if instruction.accounts.len() > 7 => {
+                        if let Ok(trade_info) =
+                            parse_instruction_trade_data(&solana_ix, &accounts_pubkeys, true)
+                        {
+                            instructions.push(DexInstruction::UserTrade(trade_info));
+                        }
+                    }
+                    Some(Self::SELL_IX)
+                        if instruction.data.len() == 24 && instruction.accounts.len() >= 12 =>
+                    {
+                        if let Ok(trade_info) =
+                            parse_instruction_trade_data(&solana_ix, &accounts_pubkeys, false)
+                        {
+                            instructions.push(DexInstruction::UserTrade(trade_info));
+                        }
+                    }
+                    _ => {}
+                }
             }
         }
 
-        let program_id_2 = Pubkey::from_str(Self::PROGRAM_ID_2).unwrap_or_default();
-        let program_id_2_bytes = program_id_2.to_bytes().to_vec();
-        let pump_index_2 = accounts.iter().position(|key| key == &program_id_2_bytes);
+        let pump_index_2 = accounts_pubkeys
+            .iter()
+            .position(|key| key == &RAYDIUM_LAUNCHLAB_PROGRAM_ID);
         if let Some(index) = pump_index_2 {
-            let signature = tx_signature.clone();
-            println!("发现bonk交易hash: {}", signature);
             for instruction in compiled_instructions {
                 if instruction.program_id_index as usize == index {
                     let all_accounts_valid = instruction
@@ -293,20 +290,10 @@ impl LogFilter {
                     if instruction.data.len() < 8 {
                         continue;
                     }
-                    let solana_ix = Self::convert_proto_instruction(instruction);
-                    let accounts_pubkeys: Vec<Pubkey> = accounts
-                        .iter()
-                        .map(|key_bytes| {
-                            let mut array = [0u8; 32];
-                            let len = std::cmp::min(key_bytes.len(), 32);
-                            array[..len].copy_from_slice(&key_bytes[..len]);
-                            Pubkey::new_from_array(array)
-                        })
-                        .collect();
+                    let solana_ix = Self::convert_proto_instruction(instruction)?;
 
                     match instruction.data.get(0..8) {
-                        Some(Self::INITIALIZE_V2) => {
-                            println!("匹配到BONK创建代币指令! signature: {}", signature);
+                        Some(Self::INITIALIZE) | Some(Self::INITIALIZE_V2) => {
                             match parse_instruction_bonk_create_token_data(
                                 &solana_ix,
                                 &accounts_pubkeys,
@@ -315,7 +302,7 @@ impl LogFilter {
                                     instructions.push(DexInstruction::BonkCreateToken(token_info));
                                 }
                                 Err(e) => {
-                                    println!("解析BONK创建代币失败: {:?}", e);
+                                    log::debug!("failed to parse Raydium LaunchLab create: {e}");
                                 }
                             }
                         }
@@ -358,37 +345,19 @@ impl LogFilter {
     pub fn parse_tip_info_shreder(
         tx_info: &SubscribeTransactionsResponse,
     ) -> (Option<u32>, Option<u64>, Option<String>, Option<u64>) {
-        let compiled_instructions = &tx_info
+        let Some(message) = tx_info
             .transaction
             .as_ref()
-            .unwrap()
-            .transaction
-            .as_ref()
-            .unwrap()
-            .message
-            .as_ref()
-            .unwrap()
-            .instructions;
-        let accounts = &tx_info
-            .transaction
-            .as_ref()
-            .unwrap()
-            .transaction
-            .as_ref()
-            .unwrap()
-            .message
-            .as_ref()
-            .unwrap()
-            .account_keys;
-        let accounts_pubkeys: Vec<Pubkey> = accounts
-            .iter()
-            .map(|key_bytes| {
-                let mut array = [0u8; 32];
-                let len = std::cmp::min(key_bytes.len(), 32);
-                array[..len].copy_from_slice(&key_bytes[..len]);
-                Pubkey::new_from_array(array)
-            })
-            .collect();
+            .and_then(|update| update.transaction.as_ref())
+            .and_then(|transaction| transaction.message.as_ref())
+        else {
+            return (None, None, None, None);
+        };
+        let compiled_instructions = &message.instructions;
+        let accounts = &message.account_keys;
+        let Ok(accounts_pubkeys) = Self::parse_proto_pubkeys(accounts) else {
+            return (None, None, None, None);
+        };
 
         let mut unit_limit: Option<u32> = None;
         let mut unit_price: Option<u64> = None;
@@ -396,11 +365,14 @@ impl LogFilter {
         let mut fee: Option<u64> = None;
 
         for proto_ix in compiled_instructions {
-            let instruction = Self::convert_proto_instruction(proto_ix);
-            let program_id = accounts_pubkeys[instruction.program_id_index as usize];
-            if program_id.to_string() == "ComputeBudget111111111111111111111111111111"
-                && !instruction.data.is_empty()
-            {
+            let Ok(instruction) = Self::convert_proto_instruction(proto_ix) else {
+                continue;
+            };
+            let Some(program_id) = accounts_pubkeys.get(instruction.program_id_index as usize)
+            else {
+                continue;
+            };
+            if program_id == &COMPUTE_BUDGET_PROGRAM_ID && !instruction.data.is_empty() {
                 match instruction.data[0] {
                     2 => {
                         if instruction.data.len() >= 5 {
@@ -430,7 +402,7 @@ impl LogFilter {
                 }
             }
             // 识别 System Program 转账
-            if program_id.to_string() == "11111111111111111111111111111111"
+            if program_id == &SYSTEM_PROGRAM_ID
                 && instruction.data.len() >= 12
                 && instruction.data[0] == 2
                 && instruction.data[1] == 0
@@ -440,8 +412,8 @@ impl LogFilter {
             {
                 // 解析收款人
                 let to_index = instruction.accounts[1] as usize;
-                if to_index < accounts.len() {
-                    let recipient = accounts_pubkeys[to_index].to_string();
+                if to_index < accounts_pubkeys.len() {
+                    let recipient = &accounts_pubkeys[to_index];
                     let amount = u64::from_le_bytes([
                         instruction.data[4],
                         instruction.data[5],
@@ -452,7 +424,7 @@ impl LogFilter {
                         instruction.data[10],
                         instruction.data[11],
                     ]);
-                    let tip_type = Self::get_tip_type(&recipient);
+                    let tip_type = Self::get_tip_type(recipient);
                     fee_merchant = Some(tip_type);
                     fee = Some(amount);
                 }
@@ -473,11 +445,11 @@ impl LogFilter {
         let mut fee: Option<u64> = None;
 
         for instruction in compiled_instructions {
-            let program_id = accounts[instruction.program_id_index as usize];
+            let Some(program_id) = accounts.get(instruction.program_id_index as usize) else {
+                continue;
+            };
 
-            if program_id.to_string() == "ComputeBudget111111111111111111111111111111"
-                && !instruction.data.is_empty()
-            {
+            if program_id == &COMPUTE_BUDGET_PROGRAM_ID && !instruction.data.is_empty() {
                 match instruction.data[0] {
                     2 => {
                         if instruction.data.len() >= 5 {
@@ -507,7 +479,7 @@ impl LogFilter {
                 }
             }
             // 识别 System Program 转账
-            if program_id.to_string() == "11111111111111111111111111111111"
+            if program_id == &SYSTEM_PROGRAM_ID
                 && instruction.data.len() >= 12
                 && instruction.data[0] == 2
                 && instruction.data[1] == 0
@@ -518,7 +490,7 @@ impl LogFilter {
                 // 解析收款人
                 let to_index = instruction.accounts[1] as usize;
                 if to_index < accounts.len() {
-                    let recipient = accounts[to_index].to_string();
+                    let recipient = &accounts[to_index];
                     let amount = u64::from_le_bytes([
                         instruction.data[4],
                         instruction.data[5],
@@ -529,7 +501,7 @@ impl LogFilter {
                         instruction.data[10],
                         instruction.data[11],
                     ]);
-                    let tip_type = Self::get_tip_type(&recipient);
+                    let tip_type = Self::get_tip_type(recipient);
                     fee_merchant = Some(tip_type);
                     fee = Some(amount);
                 }
@@ -539,45 +511,25 @@ impl LogFilter {
         (unit_limit, unit_price, fee_merchant, fee)
     }
 
-    // 直接在 impl LogFilter 里加这个简单函数
-    fn get_tip_type(recipient: &str) -> String {
-        let jito_accounts = [
-            "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
-            "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT",
-            "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt",
-            "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh",
-            "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL",
-            "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5",
-            "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY",
-            "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
-        ];
-        let solt0_accounts = [
-            "DiTmWENJsHQdawVUUKnUXkconcpW4Jv52TnMWhkncF6t",
-            "HRyRhQ86t3H4aAtgvHVpUJmw64BDrb61gRiKcdKUXs5c",
-            "7y4whZmw388w1ggjToDLSBLv47drw5SUXcLk6jtmwixd",
-            "J9BMEWFbCBEjtQ1fG5Lo9kouX1HfrKQxeUxetwXrifBw",
-            "8U1JPQh3mVQ4F5jwRdFTBzvNRQaYFQppHQYoH38DJGSQ",
-            "Eb2KpSC8uMt9GmzyAEm5Eb1AAAgTjRaXWFjKyFXHZxF3",
-            "FCjUJZ1qozm1e8romw216qyfQMaaWKxWsuySnumVCCNe",
-            "ENxTEjSQ1YabmUpXAdCgevnHQ9MHdLv8tzFiuiYJqa13",
-            "6rYLG55Q9RpsPGvqdPNJs4z5WTxJVatMB8zV3WJhs5EK",
-            "Cix2bHfqPcKcM233mzxbLk14kSggUUiz2A87fJtGivXr",
-        ];
-        if jito_accounts.contains(&recipient) {
+    fn get_tip_type(recipient: &Pubkey) -> String {
+        if JITO_TIP_ACCOUNTS.contains(recipient) {
             "JITO".to_string()
-        } else if solt0_accounts.contains(&recipient) {
+        } else if SOLT0_TIP_ACCOUNTS.contains(recipient) {
             "SOLT0".to_string()
-        } else if recipient.starts_with("node") {
-            "NODE".to_string()
-        } else if recipient.starts_with("noz") || recipient.starts_with("TEMP") {
-            "TEMP".to_string()
-        } else if recipient.starts_with("Next")
-            || recipient.starts_with("neXt")
-            || recipient.starts_with("next")
-        {
-            "NEXT".to_string()
         } else {
-            "UNKNOWN".to_string()
+            let recipient = recipient.to_string();
+            if recipient.starts_with("node") {
+                "NODE".to_string()
+            } else if recipient.starts_with("noz") || recipient.starts_with("TEMP") {
+                "TEMP".to_string()
+            } else if recipient.starts_with("Next")
+                || recipient.starts_with("neXt")
+                || recipient.starts_with("next")
+            {
+                "NEXT".to_string()
+            } else {
+                "UNKNOWN".to_string()
+            }
         }
     }
 
@@ -588,29 +540,27 @@ impl LogFilter {
     ) -> ClientResult<Vec<DexInstruction>> {
         let mut current_instruction = None;
         let mut program_data = String::new();
-        let mut invoke_depth = 0;
+        let mut invocation_stack = Vec::new();
+        let mut pump_depth = 0usize;
         let mut last_data_len = 0;
         let mut instructions = Vec::new();
         for log in logs {
-            // Check program invocation
-            if log.contains(&format!("Program {} invoke", Self::PROGRAM_ID)) {
-                invoke_depth += 1;
-                if invoke_depth == 1 {
-                    // Only reset state at top level call
+            if log.starts_with("Program ") && log.contains(" invoke [") {
+                let is_pump = log.contains(PUMPFUN_INVOKE_LOG);
+                if is_pump {
+                    pump_depth += 1;
+                }
+                if is_pump && pump_depth == 1 {
                     current_instruction = None;
                     program_data.clear();
                     last_data_len = 0;
                 }
+                invocation_stack.push(is_pump);
                 continue;
             }
 
-            // Skip if not in our program
-            if invoke_depth == 0 {
-                continue;
-            }
-
-            // Identify instruction type (only at top level)
-            if invoke_depth == 1 && log.contains("Program log: Instruction:") {
+            let active_outer_pump = pump_depth == 1 && invocation_stack.last() == Some(&true);
+            if active_outer_pump && log.contains("Program log: Instruction:") {
                 if log.contains("Create") {
                     current_instruction = Some("create");
                 } else if log.contains("Buy") || log.contains("Sell") {
@@ -619,8 +569,7 @@ impl LogFilter {
                 continue;
             }
 
-            // Collect Program data
-            if log.starts_with("Program data: ") {
+            if active_outer_pump && log.starts_with("Program data: ") {
                 let data = log.trim_start_matches("Program data: ");
                 if data.len() > last_data_len {
                     program_data = data.to_string();
@@ -628,11 +577,16 @@ impl LogFilter {
                 }
             }
 
-            // Check if program ends
-            if log.contains(&format!("Program {} success", Self::PROGRAM_ID)) {
-                invoke_depth -= 1;
-                if invoke_depth == 0 {
-                    // Only process data when top level program ends
+            let program_ended = log.starts_with("Program ")
+                && (log.ends_with(" success") || log.contains(" failed:"));
+            if program_ended {
+                let Some(was_pump) = invocation_stack.pop() else {
+                    continue;
+                };
+                if was_pump {
+                    pump_depth = pump_depth.saturating_sub(1);
+                }
+                if was_pump && pump_depth == 0 && log.contains(PUMPFUN_SUCCESS_LOG) {
                     if let Some(instruction_type) = current_instruction {
                         if !program_data.is_empty() {
                             match instruction_type {
@@ -644,9 +598,7 @@ impl LogFilter {
                                 "trade" => {
                                     if let Ok(trade_info) = parse_trade_data(&program_data) {
                                         if let Some(bot_wallet_pubkey) = bot_wallet {
-                                            if trade_info.user.to_string()
-                                                == bot_wallet_pubkey.to_string()
-                                            {
+                                            if trade_info.user == bot_wallet_pubkey {
                                                 instructions
                                                     .push(DexInstruction::BotTrade(trade_info));
                                             } else {
@@ -668,5 +620,184 @@ impl LogFilter {
         }
 
         Ok(instructions)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::shredstream::{
+        CompiledInstruction, Message, SubscribeUpdateTransaction, Transaction,
+    };
+    use base64::Engine as _;
+    use solana_sdk::{
+        hash::Hash,
+        message::{v0, MessageHeader, VersionedMessage},
+        signature::Signature,
+    };
+
+    fn response(
+        account_keys: Vec<Vec<u8>>,
+        instructions: Vec<CompiledInstruction>,
+    ) -> SubscribeTransactionsResponse {
+        SubscribeTransactionsResponse {
+            transaction: Some(SubscribeUpdateTransaction {
+                transaction: Some(Transaction {
+                    signatures: vec![vec![7; 64]],
+                    message: Some(Message {
+                        account_keys,
+                        instructions,
+                        ..Message::default()
+                    }),
+                }),
+                slot: 42,
+            }),
+            ..SubscribeTransactionsResponse::default()
+        }
+    }
+
+    fn trade_log_data(user: Pubkey, trailing_bytes: usize) -> String {
+        let mut data = vec![0u8; 129 + trailing_bytes];
+        data[40..48].copy_from_slice(&11u64.to_le_bytes());
+        data[48..56].copy_from_slice(&22u64.to_le_bytes());
+        data[56] = 1;
+        data[57..89].copy_from_slice(user.as_ref());
+        base64::engine::general_purpose::STANDARD.encode(data)
+    }
+
+    #[test]
+    fn protobuf_parser_requires_transaction_fields() {
+        let response = SubscribeTransactionsResponse::default();
+        assert!(LogFilter::parse_compiled_instruction_shreder(&response).is_err());
+        assert_eq!(
+            LogFilter::parse_tip_info_shreder(&response),
+            (None, None, None, None)
+        );
+    }
+
+    #[test]
+    fn protobuf_parser_rejects_malformed_pubkeys() {
+        let response = response(vec![vec![0; 31]], vec![]);
+        assert!(LogFilter::parse_compiled_instruction_shreder(&response).is_err());
+    }
+
+    #[test]
+    fn protobuf_instruction_rejects_truncated_program_index() {
+        let instruction = CompiledInstruction {
+            program_id_index: 256,
+            accounts: vec![],
+            data: vec![],
+        };
+        assert!(LogFilter::convert_proto_instruction(&instruction).is_err());
+    }
+
+    #[test]
+    fn protobuf_parser_does_not_match_discriminator_from_other_program() {
+        let mut data = LogFilter::BUY_IX.to_vec();
+        data.extend_from_slice(&1u64.to_le_bytes());
+        data.extend_from_slice(&2u64.to_le_bytes());
+        let instruction = CompiledInstruction {
+            program_id_index: 0,
+            accounts: vec![0; 8],
+            data,
+        };
+        let response = response(
+            vec![Pubkey::new_unique().to_bytes().to_vec()],
+            vec![instruction],
+        );
+
+        let parsed = LogFilter::parse_compiled_instruction_shreder(&response)
+            .expect("well-formed protobuf transaction");
+        assert!(parsed.is_empty());
+    }
+
+    #[test]
+    fn protobuf_tip_parser_ignores_invalid_program_index() {
+        let instruction = CompiledInstruction {
+            program_id_index: 999,
+            accounts: vec![],
+            data: vec![2, 1, 0, 0, 0],
+        };
+        let response = response(
+            vec![COMPUTE_BUDGET_PROGRAM_ID.to_bytes().to_vec()],
+            vec![instruction],
+        );
+        assert_eq!(
+            LogFilter::parse_tip_info_shreder(&response),
+            (None, None, None, None)
+        );
+    }
+
+    #[test]
+    fn versioned_transaction_parser_emits_sell_trades() {
+        let mut data = LogFilter::SELL_IX.to_vec();
+        data.extend_from_slice(&123u64.to_le_bytes());
+        data.extend_from_slice(&456u64.to_le_bytes());
+        let mut account_keys = vec![PUMPFUN_PROGRAM_ID];
+        account_keys.extend((0..12).map(|_| Pubkey::new_unique()));
+        let transaction = VersionedTransaction {
+            signatures: vec![Signature::default()],
+            message: VersionedMessage::V0(v0::Message {
+                header: MessageHeader {
+                    num_required_signatures: 1,
+                    num_readonly_signed_accounts: 0,
+                    num_readonly_unsigned_accounts: 0,
+                },
+                account_keys,
+                recent_blockhash: Hash::default(),
+                instructions: vec![SolanaCompiledInstruction::new_from_raw_parts(
+                    0,
+                    data,
+                    (1..=12).collect(),
+                )],
+                address_table_lookups: vec![],
+            }),
+        };
+
+        let parsed = LogFilter::parse_compiled_instruction(&transaction, None)
+            .expect("well-formed transaction");
+        assert!(matches!(
+            parsed.as_slice(),
+            [DexInstruction::UserTrade(trade)]
+                if !trade.is_buy && trade.token_amount == 123 && trade.sol_amount == 456
+        ));
+    }
+
+    #[test]
+    fn log_parser_ignores_nested_program_data() {
+        let nested_user = Pubkey::new_unique();
+        let pump_user = Pubkey::new_unique();
+        let logs = vec![
+            format!("{PUMPFUN_INVOKE_LOG} [1]"),
+            "Program log: Instruction: Buy".to_string(),
+            "Program 11111111111111111111111111111111 invoke [2]".to_string(),
+            format!("Program data: {}", trade_log_data(nested_user, 64)),
+            "Program 11111111111111111111111111111111 success".to_string(),
+            format!("Program data: {}", trade_log_data(pump_user, 0)),
+            PUMPFUN_SUCCESS_LOG.to_string(),
+        ];
+
+        let parsed = LogFilter::parse_instruction(&logs, None).expect("well-formed logs");
+        assert!(
+            matches!(
+                parsed.as_slice(),
+                [DexInstruction::UserTrade(trade)] if trade.user == pump_user
+            ),
+            "parsed events: {parsed:?}"
+        );
+    }
+
+    #[test]
+    fn failed_pump_invocation_does_not_emit_events() {
+        let logs = vec![
+            format!("{PUMPFUN_INVOKE_LOG} [1]"),
+            "Program log: Instruction: Buy".to_string(),
+            format!("Program data: {}", trade_log_data(Pubkey::new_unique(), 0)),
+            "Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P failed: custom program error: 0x1"
+                .to_string(),
+        ];
+
+        let parsed = LogFilter::parse_instruction(&logs, None).expect("well-formed logs");
+        assert!(parsed.is_empty());
     }
 }

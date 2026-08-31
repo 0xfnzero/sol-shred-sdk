@@ -2,10 +2,10 @@
 //!
 //! 提供账户数据解析的通用工具函数
 
+use solana_program_pack::Pack;
 use solana_sdk::pubkey::Pubkey;
 use solana_system_interface::program as system_program;
-use spl_token::solana_program::program_pack::Pack;
-use spl_token::state::Account as SplTokenStateAccount;
+use spl_token_interface::state::Account as SplTokenStateAccount;
 
 /// 从字节数组中读取 Pubkey
 #[inline]
@@ -56,8 +56,8 @@ pub fn is_nonce_account(data: &[u8]) -> bool {
 /// 检查账户所有者是否是 Token Program
 #[inline]
 pub fn is_token_program_account(owner: &Pubkey) -> bool {
-    owner.to_bytes() == spl_token::ID.to_bytes()
-        || owner.to_bytes() == spl_token_2022::ID.to_bytes()
+    owner.to_bytes() == spl_token_interface::ID.to_bytes()
+        || owner.to_bytes() == spl_token_2022_interface::ID.to_bytes()
 }
 
 /// 由 `get_account` 得到的 owner / data / executable，判断「该地址」是否对应普通用户侧钱包语义，并返回应作为 **用户公钥** 使用的 [`Pubkey`]。

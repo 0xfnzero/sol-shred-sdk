@@ -7,7 +7,7 @@ use crate::core::events::*;
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
 
 use memchr::memmem;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock as Lazy;
 
 #[cfg(feature = "perf-stats")]
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -91,20 +91,15 @@ pub unsafe fn read_pubkey_unchecked(data: &[u8], offset: usize) -> Pubkey {
 #[inline(always)]
 /// # Safety
 ///
-/// Caller must ensure the 4-byte length prefix is readable and, when present,
-/// the following bytes are valid UTF-8.
+/// Caller must ensure `offset` is a valid position within `data`.
 pub unsafe fn read_str_unchecked(data: &[u8], offset: usize) -> Option<(&str, usize)> {
-    if data.len() < offset + 4 {
-        return None;
-    }
-
+    let content_offset = offset.checked_add(4)?;
+    let length_bytes = data.get(offset..content_offset)?;
     let len = read_u32_unchecked(data, offset) as usize;
-    if data.len() < offset + 4 + len {
-        return None;
-    }
-
-    let string_bytes = &data[offset + 4..offset + 4 + len];
-    let s = std::str::from_utf8_unchecked(string_bytes);
+    debug_assert_eq!(length_bytes.len(), 4);
+    let end = content_offset.checked_add(len)?;
+    let string_bytes = data.get(content_offset..end)?;
+    let s = std::str::from_utf8(string_bytes).ok()?;
     Some((s, 4 + len))
 }
 
@@ -1359,6 +1354,12 @@ mod tests {
         let log = "Program data: G3Kp5Dfe605nAAAAAAAAAAA=";
         let disc = extract_discriminator_simd(log);
         assert!(disc.is_some());
+    }
+
+    #[test]
+    fn string_reader_rejects_invalid_utf8() {
+        let data = [1, 0, 0, 0, 0xff];
+        assert!(unsafe { read_str_unchecked(&data, 0) }.is_none());
     }
 
     #[test]

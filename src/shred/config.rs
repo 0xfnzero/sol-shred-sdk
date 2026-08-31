@@ -18,7 +18,7 @@ pub struct RawShredConfig {
     pub forward_slot_watermark: bool,
     /// Bytes to skip before the Solana shred. Keep `0` for native raw shreds.
     pub udp_payload_prefix_skip: usize,
-    /// Guardrail for deshred output before bincode decoding.
+    /// Guardrail for deshred output before wincode decoding.
     pub max_deshred_bytes: usize,
 }
 

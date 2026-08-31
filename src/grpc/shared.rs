@@ -1,4 +1,4 @@
-#[derive(Clone, PartialEq, ::prost::Message)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct Socket {
     #[prost(string, tag = "1")]
     pub ip: String,

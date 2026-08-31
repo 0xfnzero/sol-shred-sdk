@@ -1,8 +1,9 @@
 use std::net::UdpSocket as StdUdpSocket;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::UdpSocket;
+use tokio::time::{interval_at, MissedTickBehavior};
 
 use super::config::RawShredConfig;
 use super::decoder::{entries_to_tx_batch, ShredEntryBatch, ShredTxBatch};
@@ -46,23 +47,38 @@ impl RawShredClient {
         F: FnMut(ShredEntryBatch) + Send,
     {
         let mut buf = vec![0u8; self.config.max_datagram_size.max(1280)];
+        let eviction_period = self
+            .config
+            .reassembly_gap_timeout
+            .max(Duration::from_millis(1));
+        let mut eviction_interval = interval_at(
+            tokio::time::Instant::now() + eviction_period,
+            eviction_period,
+        );
+        eviction_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
         loop {
-            self.socket.readable().await?;
-            for _ in 0..MAX_DATAGRAMS_PER_POLL {
-                match self.socket.try_recv(&mut buf) {
-                    Ok(n) => {
-                        let now = Instant::now();
-                        for batch in self.decoder.push_packet(&buf[..n], now) {
-                            callback(batch);
+            tokio::select! {
+                ready = self.socket.readable() => {
+                    ready?;
+                    let batch_now = Instant::now();
+                    for _ in 0..MAX_DATAGRAMS_PER_POLL {
+                        match self.socket.try_recv(&mut buf) {
+                            Ok(n) => {
+                                for batch in self.decoder.push_packet(&buf[..n], batch_now) {
+                                    callback(batch);
+                                }
+                            }
+                            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
+                            Err(error) => return Err(error.into()),
                         }
                     }
-                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
-                    Err(error) => return Err(error.into()),
+                    tokio::task::yield_now().await;
+                }
+                _ = eviction_interval.tick() => {
+                    self.decoder.evict_stale_slots(Instant::now());
                 }
             }
-            self.decoder.evict_stale_slots(Instant::now());
-            tokio::task::yield_now().await;
         }
     }
 

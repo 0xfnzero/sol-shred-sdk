@@ -696,7 +696,7 @@ mod tests {
             pubkey: Pubkey::new_unique(),
             executable: false,
             lamports: 0,
-            owner: Pubkey::new_from_array(spl_token::ID.to_bytes()),
+            owner: Pubkey::new_from_array(spl_token_interface::ID.to_bytes()),
             rent_epoch: 0,
             data,
         };

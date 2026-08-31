@@ -2,19 +2,18 @@
 //!
 //! 提供高性能缓存机制，减少内存分配和重复计算：
 //! - 程序ID缓存：避免重复查找和分配
-//! - 账户公钥缓存：线程局部缓存，零锁竞争
+//! - 账户公钥缓存：由调用方持有并跨调用复用，零锁竞争
 //!
 //! ## 性能优势
 //!
 //! - **减少 30-50% 内存分配**：通过缓存重用避免重复分配
-//! - **零锁竞争**：线程局部存储，每个线程独立缓存
+//! - **零锁竞争**：缓存实例不包含共享状态
 //! - **快速查找**：读写锁优化，读操作无阻塞
 //!
 //! ## 使用示例
 //!
 //! ```rust
-//! use sol_shred_sdk::core::cache::build_account_pubkeys_with_cache;
-//! use solana_sdk::pubkey::Pubkey;
+//! use sol_shred_sdk::{core::cache::build_account_pubkeys_with_cache, Pubkey};
 //!
 //! let instruction_accounts = vec![0u8, 1, 2];
 //! let all_accounts = vec![Pubkey::default(); 10];
@@ -24,7 +23,6 @@
 //! ```
 
 use solana_sdk::pubkey::Pubkey;
-use std::cell::RefCell;
 
 // ============================================================================
 // 账户公钥缓存工具（Account Pubkey Cache）
@@ -92,12 +90,7 @@ impl Default for AccountPubkeyCache {
     }
 }
 
-thread_local! {
-    static THREAD_LOCAL_ACCOUNT_CACHE: RefCell<AccountPubkeyCache> =
-        RefCell::new(AccountPubkeyCache::new());
-}
-
-/// 从线程局部缓存构建账户公钥列表
+/// 构建拥有所有权的账户公钥列表
 ///
 /// # 参数
 /// - `instruction_accounts`: 指令账户索引列表
@@ -106,17 +99,14 @@ thread_local! {
 /// # 返回
 /// 账户公钥向量
 ///
-/// # 线程安全
-/// 使用线程局部存储，每个线程独立缓存
-///
 /// # 性能
-/// - 首次调用：分配缓存（约 1μs）
-/// - 后续调用：重用缓存（约 100ns）
+/// 返回值拥有数据，因此需要一次精确容量分配。需要跨调用复用内存时，
+/// 请直接持有 [`AccountPubkeyCache`] 并调用
+/// [`AccountPubkeyCache::build_account_pubkeys`]。
 ///
 /// # 示例
 /// ```rust
-/// use sol_shred_sdk::core::cache::build_account_pubkeys_with_cache;
-/// use solana_sdk::pubkey::Pubkey;
+/// use sol_shred_sdk::{core::cache::build_account_pubkeys_with_cache, Pubkey};
 ///
 /// let instruction_accounts = vec![0u8, 1, 2];
 /// let all_accounts = vec![Pubkey::default(); 10];
@@ -129,12 +119,13 @@ pub fn build_account_pubkeys_with_cache(
     instruction_accounts: &[u8],
     all_accounts: &[Pubkey],
 ) -> Vec<Pubkey> {
-    THREAD_LOCAL_ACCOUNT_CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        cache
-            .build_account_pubkeys(instruction_accounts, all_accounts)
-            .to_vec()
-    })
+    let mut account_pubkeys = Vec::with_capacity(instruction_accounts.len());
+    account_pubkeys.extend(
+        instruction_accounts
+            .iter()
+            .filter_map(|&index| all_accounts.get(index as usize).copied()),
+    );
+    account_pubkeys
 }
 
 #[cfg(test)]
@@ -186,7 +177,7 @@ mod tests {
     }
 
     #[test]
-    fn test_thread_local_cache() {
+    fn test_owned_account_list_builder() {
         let all_accounts = vec![Pubkey::new_unique(); 5];
         let instruction_accounts = vec![0u8, 1, 2];
 
@@ -198,7 +189,7 @@ mod tests {
     }
 
     #[test]
-    fn test_thread_local_cache_multiple_calls() {
+    fn test_owned_account_list_builder_multiple_calls() {
         let all_accounts = vec![Pubkey::new_unique(); 10];
 
         // 第一次调用

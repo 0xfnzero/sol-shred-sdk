@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crossbeam_queue::ArrayQueue;
@@ -8,8 +8,8 @@ use futures::StreamExt;
 use solana_entry::entry::Entry;
 use solana_sdk::message::VersionedMessage;
 use solana_sdk::transaction::VersionedTransaction;
-use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
+use tonic::transport::{Channel, Endpoint};
 
 use super::config::{JitoShredStreamConfig, ShredDecodeMode, ShredStreamConfig};
 use crate::common::logs_events::PumpfunEvent;
@@ -22,6 +22,11 @@ use crate::parser::{PumpfunEventParser, PumpfunParserConfig, TransactionEventPar
 use crate::shred::{RawShredClient, RawShredConfig, ShredEntryBatch};
 
 static DROPPED_EVENTS: AtomicU64 = AtomicU64::new(0);
+
+const JITO_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+const JITO_KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(10);
+const JITO_KEEP_ALIVE_TIMEOUT: Duration = Duration::from_secs(5);
+const JITO_MAX_MESSAGE_BYTES: usize = 4 * 1024 * 1024;
 
 enum EventSink<E> {
     Queue(Arc<ArrayQueue<E>>),
@@ -67,7 +72,24 @@ fn record_dropped_event() {
 #[derive(Clone)]
 pub struct ShredStreamClient {
     config: ShredStreamConfig,
-    subscription_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
+    subscription: Arc<SubscriptionState>,
+}
+
+struct SubscriptionState {
+    handle: Mutex<Option<JoinHandle<()>>>,
+}
+
+impl Drop for SubscriptionState {
+    fn drop(&mut self) {
+        let handle = self
+            .handle
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
+        if let Some(handle) = handle {
+            handle.abort();
+        }
+    }
 }
 
 impl ShredStreamClient {
@@ -88,7 +110,9 @@ impl ShredStreamClient {
     pub async fn new_with_config(config: ShredStreamConfig) -> AnyResult<Self> {
         Ok(Self {
             config,
-            subscription_handle: Arc::new(Mutex::new(None)),
+            subscription: Arc::new(SubscriptionState {
+                handle: Mutex::new(None),
+            }),
         })
     }
 
@@ -190,8 +214,15 @@ impl ShredStreamClient {
     }
 
     pub async fn stop(&self) {
-        if let Some(handle) = self.subscription_handle.lock().await.take() {
+        let handle = self
+            .subscription
+            .handle
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
+        if let Some(handle) = handle {
             handle.abort();
+            let _ = handle.await;
         }
     }
 
@@ -201,11 +232,21 @@ impl ShredStreamClient {
         P::Event: Send + 'static,
     {
         let config = self.config.clone();
-        let handle = tokio::spawn(async move {
-            run_with_restarts(config, parser, sink).await;
-        });
-
-        *self.subscription_handle.lock().await = Some(handle);
+        let previous = {
+            let mut guard = self
+                .subscription
+                .handle
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let handle = tokio::spawn(async move {
+                run_with_restarts(config, parser, sink).await;
+            });
+            guard.replace(handle)
+        };
+        if let Some(previous) = previous {
+            previous.abort();
+            let _ = previous.await;
+        }
         Ok(())
     }
 
@@ -215,11 +256,21 @@ impl ShredStreamClient {
         sink: EventSink<DexEvent>,
     ) -> AnyResult<()> {
         let config = self.config.clone();
-        let handle = tokio::spawn(async move {
-            run_dex_with_restarts(config, event_type_filter, sink).await;
-        });
-
-        *self.subscription_handle.lock().await = Some(handle);
+        let previous = {
+            let mut guard = self
+                .subscription
+                .handle
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let handle = tokio::spawn(async move {
+                run_dex_with_restarts(config, event_type_filter, sink).await;
+            });
+            guard.replace(handle)
+        };
+        if let Some(previous) = previous {
+            previous.abort();
+            let _ = previous.await;
+        }
         Ok(())
     }
 }
@@ -229,23 +280,24 @@ async fn run_dex_with_restarts(
     event_type_filter: Option<EventTypeFilter>,
     sink: EventSink<DexEvent>,
 ) {
-    let mut attempts = 0u32;
+    let mut restart_attempts = 0u32;
 
     loop {
-        if config.max_reconnect_attempts > 0 && attempts >= config.max_reconnect_attempts {
-            log::error!(
-                "{} dex client stopped after {attempts} failed restart attempts",
-                config.decode_mode.name()
-            );
-            return;
-        }
-        attempts += 1;
-
         match run_dex_once(&config, event_type_filter.as_ref(), sink.clone()).await {
             Ok(()) => {
-                attempts = 0;
+                restart_attempts = 0;
             }
             Err(error) => {
+                if config.max_reconnect_attempts > 0
+                    && restart_attempts >= config.max_reconnect_attempts
+                {
+                    log::error!(
+                        "{} dex client stopped after {restart_attempts} restart attempts: {error}",
+                        config.decode_mode.name()
+                    );
+                    return;
+                }
+                restart_attempts = restart_attempts.saturating_add(1);
                 log::error!(
                     "{} dex receive loop failed: {error}; retrying in {}ms",
                     config.decode_mode.name(),
@@ -291,14 +343,14 @@ async fn run_jito_dex_once(
     event_type_filter: Option<&EventTypeFilter>,
     sink: EventSink<DexEvent>,
 ) -> AnyResult<()> {
-    let mut client = ShredstreamProxyClient::connect(jito.endpoint.clone()).await?;
+    let mut client = connect_jito(jito).await?;
     let request = tonic::Request::new(SubscribeEntriesRequest {});
     let mut stream = client.subscribe_entries(request).await?.into_inner();
     let mut events = Vec::with_capacity(4);
 
     while let Some(message) = stream.next().await {
         let message = message?;
-        let Ok(entries) = bincode::deserialize::<Vec<Entry>>(&message.entries) else {
+        let Some(entries) = decode_entries(&message.entries) else {
             log::debug!(
                 "jito grpc entry decode failed slot={} bytes_len={}",
                 message.slot,
@@ -318,7 +370,7 @@ async fn run_jito_dex_once(
         );
     }
 
-    Ok(())
+    Err(anyhow::anyhow!("jito gRPC dex stream ended"))
 }
 
 #[inline]
@@ -418,23 +470,24 @@ where
     P: TransactionEventParser + Send + 'static,
     P::Event: Send + 'static,
 {
-    let mut attempts = 0u32;
+    let mut restart_attempts = 0u32;
 
     loop {
-        if config.max_reconnect_attempts > 0 && attempts >= config.max_reconnect_attempts {
-            log::error!(
-                "{} client stopped after {attempts} failed restart attempts",
-                config.decode_mode.name()
-            );
-            return;
-        }
-        attempts += 1;
-
         match run_once(&config, &mut parser, sink.clone()).await {
             Ok(()) => {
-                attempts = 0;
+                restart_attempts = 0;
             }
             Err(error) => {
+                if config.max_reconnect_attempts > 0
+                    && restart_attempts >= config.max_reconnect_attempts
+                {
+                    log::error!(
+                        "{} client stopped after {restart_attempts} restart attempts: {error}",
+                        config.decode_mode.name()
+                    );
+                    return;
+                }
+                restart_attempts = restart_attempts.saturating_add(1);
                 log::error!(
                     "{} receive loop failed: {error}; retrying in {}ms",
                     config.decode_mode.name(),
@@ -489,13 +542,13 @@ where
     P: TransactionEventParser + Send + 'static,
     P::Event: Send + 'static,
 {
-    let mut client = ShredstreamProxyClient::connect(jito.endpoint.clone()).await?;
+    let mut client = connect_jito(jito).await?;
     let request = tonic::Request::new(SubscribeEntriesRequest {});
     let mut stream = client.subscribe_entries(request).await?.into_inner();
 
     while let Some(message) = stream.next().await {
         let message = message?;
-        let Ok(entries) = bincode::deserialize::<Vec<Entry>>(&message.entries) else {
+        let Some(entries) = decode_entries(&message.entries) else {
             log::debug!(
                 "jito grpc entry decode failed slot={} bytes_len={}",
                 message.slot,
@@ -514,7 +567,26 @@ where
         );
     }
 
-    Ok(())
+    Err(anyhow::anyhow!("jito gRPC stream ended"))
+}
+
+async fn connect_jito(
+    config: &JitoShredStreamConfig,
+) -> AnyResult<ShredstreamProxyClient<Channel>> {
+    let channel = Endpoint::from_shared(config.endpoint.clone())?
+        .connect_timeout(JITO_CONNECT_TIMEOUT)
+        .tcp_nodelay(true)
+        .http2_keep_alive_interval(JITO_KEEP_ALIVE_INTERVAL)
+        .keep_alive_timeout(JITO_KEEP_ALIVE_TIMEOUT)
+        .keep_alive_while_idle(true)
+        .connect()
+        .await?;
+    Ok(ShredstreamProxyClient::new(channel).max_decoding_message_size(JITO_MAX_MESSAGE_BYTES))
+}
+
+#[inline]
+fn decode_entries(bytes: &[u8]) -> Option<Vec<Entry>> {
+    wincode::deserialize_exact(bytes).ok()
 }
 
 #[inline]
@@ -560,6 +632,49 @@ mod tests {
     };
     use solana_sdk::pubkey::Pubkey;
     use solana_sdk::signature::Signature;
+
+    #[test]
+    fn jito_entry_decode_rejects_trailing_bytes() {
+        let entries = vec![Entry::default()];
+        let encoded = wincode::serialize(&entries).expect("serialize entries");
+        assert!(decode_entries(&encoded).is_some());
+
+        let mut with_trailing_byte = encoded;
+        with_trailing_byte.push(0);
+        assert!(decode_entries(&with_trailing_byte).is_none());
+    }
+
+    #[test]
+    fn dropping_last_client_aborts_subscription_task() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("runtime");
+
+        runtime.block_on(async {
+            let client = ShredStreamClient {
+                config: ShredStreamConfig::default(),
+                subscription: Arc::new(SubscriptionState {
+                    handle: Mutex::new(None),
+                }),
+            };
+            let task = tokio::spawn(std::future::pending::<()>());
+            let abort_handle = task.abort_handle();
+            *client
+                .subscription
+                .handle
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(task);
+
+            let clone = client.clone();
+            drop(client);
+            tokio::task::yield_now().await;
+            assert!(!abort_handle.is_finished());
+
+            drop(clone);
+            tokio::task::yield_now().await;
+            assert!(abort_handle.is_finished());
+        });
+    }
 
     fn raydium_cpmm_swap_data() -> Vec<u8> {
         let mut data = Vec::new();

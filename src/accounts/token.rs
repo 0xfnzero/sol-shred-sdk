@@ -12,13 +12,13 @@
 use crate::accounts::utils::is_token_program_account;
 use crate::core::events::{EventMetadata, TokenAccountEvent, TokenInfoEvent};
 use crate::DexEvent;
+use solana_program_pack::Pack;
 use solana_sdk::pubkey::Pubkey;
-use spl_token::solana_program::program_pack::Pack;
-use spl_token::state::{Account, Mint};
-use spl_token_2022::{
+use spl_token_2022_interface::{
     extension::StateWithExtensions,
     state::{Account as Account2022, Mint as Mint2022},
 };
+use spl_token_interface::state::{Account, Mint};
 
 #[derive(Clone, Debug)]
 pub struct AccountData {
@@ -168,9 +168,9 @@ fn parse_token_with_extensions(account: &AccountData, metadata: EventMetadata) -
     }
 
     // 尝试解析为 Token-2022 Account（带扩展）
-    if account.owner.to_bytes() == spl_token_2022::ID.to_bytes() {
+    if account.owner.to_bytes() == spl_token_2022_interface::ID.to_bytes() {
         if let Ok(account_state) = StateWithExtensions::<Account2022>::unpack(&account.data) {
-            // 转换 spl_token_2022::Pubkey 到 solana_sdk::Pubkey
+            // Convert the interface address into the SDK's aligned Pubkey type.
             let token_owner = Pubkey::new_from_array(account_state.base.owner.to_bytes());
             let event = TokenAccountEvent {
                 metadata,
@@ -188,7 +188,7 @@ fn parse_token_with_extensions(account: &AccountData, metadata: EventMetadata) -
 
     // 尝试解析为标准 SPL Token Account
     if let Ok(token_account) = Account::unpack(&account.data) {
-        // 转换 spl_token::Pubkey 到 solana_sdk::Pubkey
+        // Convert the interface pubkey into the SDK's aligned Pubkey type.
         let token_owner = Pubkey::new_from_array(token_account.owner.to_bytes());
         let event = TokenAccountEvent {
             metadata,
@@ -223,7 +223,7 @@ mod tests {
             pubkey: Pubkey::new_unique(),
             executable: false,
             lamports: 1000000,
-            owner: Pubkey::new_from_array(spl_token::ID.to_bytes()),
+            owner: Pubkey::new_from_array(spl_token_interface::ID.to_bytes()),
             rent_epoch: 0,
             data,
         };
@@ -249,7 +249,7 @@ mod tests {
             pubkey: Pubkey::new_unique(),
             executable: false,
             lamports: 2039280,
-            owner: Pubkey::new_from_array(spl_token::ID.to_bytes()),
+            owner: Pubkey::new_from_array(spl_token_interface::ID.to_bytes()),
             rent_epoch: 0,
             data,
         };

@@ -1,7 +1,7 @@
 use super::types::*;
-use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use solana_sdk::signature::Signature;
+use std::sync::LazyLock as Lazy;
 
 // ====================== 统一的 DEX 事件枚举 ======================
 

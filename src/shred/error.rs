@@ -19,9 +19,3 @@ impl From<solana_ledger::shred::Error> for ShredDecodeError {
         Self::Parse(error.to_string())
     }
 }
-
-impl From<bincode::Error> for ShredDecodeError {
-    fn from(error: bincode::Error) -> Self {
-        Self::DecodeEntries(error.to_string())
-    }
-}

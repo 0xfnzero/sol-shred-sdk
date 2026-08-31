@@ -12,8 +12,8 @@
 
 use crate::core::events::*;
 use memchr::memmem;
-use once_cell::sync::Lazy;
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
+use std::sync::LazyLock as Lazy;
 
 #[cfg(feature = "perf-stats")]
 use std::sync::atomic::{AtomicUsize, Ordering};

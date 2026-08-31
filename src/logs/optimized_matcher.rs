@@ -12,9 +12,9 @@ use crate::core::events::{DexEvent, EventMetadata};
 use crate::grpc::types::{EventType, EventTypeFilter};
 use crate::instr::program_ids;
 use memchr::memmem;
-use once_cell::sync::Lazy;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Signature;
+use std::sync::LazyLock as Lazy;
 
 /// SIMD 优化的字符串查找器 - 预编译一次，重复使用
 static PUMPFUN_FINDER: Lazy<memmem::Finder> =

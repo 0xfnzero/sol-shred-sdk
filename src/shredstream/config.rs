@@ -7,20 +7,13 @@ use crate::shred::RawShredConfig;
 #[derive(Debug, Clone)]
 pub struct JitoShredStreamConfig {
     pub endpoint: String,
-    pub channel_size: usize,
 }
 
 impl JitoShredStreamConfig {
     pub fn new(endpoint: impl Into<String>) -> Self {
         Self {
             endpoint: endpoint.into(),
-            channel_size: 1_000,
         }
-    }
-
-    pub fn with_channel_size(mut self, channel_size: usize) -> Self {
-        self.channel_size = channel_size.max(1);
-        self
     }
 }
 

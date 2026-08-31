@@ -1,16 +1,16 @@
-use solana_client::{
-    nonblocking::pubsub_client::PubsubClient,
-    rpc_config::{RpcTransactionLogsConfig, RpcTransactionLogsFilter},
-};
+use solana_pubsub_client::nonblocking::pubsub_client::{PubsubClient, PubsubClientResult};
+use solana_rpc_client_api::config::{RpcTransactionLogsConfig, RpcTransactionLogsFilter};
 
 use crate::common::{logs_data::DexInstruction, logs_filters::LogFilter};
 use futures::StreamExt;
 use solana_sdk::{commitment_config::CommitmentConfig, pubkey::Pubkey};
-use std::sync::Arc;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
+use tokio::time::{timeout, Duration};
 
 use super::logs_events::PumpfunEvent;
+
+const SUBSCRIPTION_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Subscription handle containing task and unsubscribe logic
 pub struct SubscriptionHandle {
@@ -20,13 +20,20 @@ pub struct SubscriptionHandle {
 
 impl SubscriptionHandle {
     pub async fn shutdown(self) {
-        (self.unsub_fn)();
-        self.task.abort();
+        let Self { mut task, unsub_fn } = self;
+        unsub_fn();
+        if timeout(SUBSCRIPTION_SHUTDOWN_TIMEOUT, &mut task)
+            .await
+            .is_err()
+        {
+            task.abort();
+            let _ = task.await;
+        }
     }
 }
 
-pub async fn create_pubsub_client(ws_url: &str) -> PubsubClient {
-    PubsubClient::new(ws_url).await.unwrap()
+pub async fn create_pubsub_client(ws_url: &str) -> PubsubClientResult<PubsubClient> {
+    PubsubClient::new(ws_url).await
 }
 
 /// 启动订阅
@@ -46,31 +53,45 @@ where
         commitment: Some(commitment),
     };
 
-    // Create PubsubClient
-    let sub_client = Arc::new(PubsubClient::new(ws_url).await.unwrap());
+    let sub_client = PubsubClient::new(ws_url).await?;
 
-    let sub_client_clone = Arc::clone(&sub_client);
+    let (unsub_tx, mut unsub_rx) = mpsc::channel(1);
+    let (ready_tx, ready_rx) = oneshot::channel();
 
-    // Create channel for unsubscribe
-    let (unsub_tx, _) = mpsc::channel(1);
-
-    // Start subscription task
     let task = tokio::spawn(async move {
-        let (mut stream, _) = sub_client_clone
-            .logs_subscribe(logs_filter, logs_config)
-            .await
-            .unwrap();
+        let (mut stream, unsubscribe) =
+            match sub_client.logs_subscribe(logs_filter, logs_config).await {
+                Ok(subscription) => subscription,
+                Err(error) => {
+                    let _ = ready_tx.send(Err(error));
+                    return;
+                }
+            };
+        if ready_tx.send(Ok(())).is_err() {
+            let _ = timeout(SUBSCRIPTION_SHUTDOWN_TIMEOUT, unsubscribe()).await;
+            return;
+        }
 
         loop {
-            let msg = stream.next().await;
-            match msg {
-                Some(msg) => {
+            tokio::select! {
+                _ = unsub_rx.recv() => break,
+                msg = stream.next() => {
+                    let Some(msg) = msg else {
+                        log::warn!("token log subscription stream ended");
+                        break;
+                    };
+
                     if let Some(_err) = msg.value.err {
                         continue;
                     }
 
-                    let instructions =
-                        LogFilter::parse_instruction(&msg.value.logs, bot_wallet).unwrap();
+                    let instructions = match LogFilter::parse_instruction(&msg.value.logs, bot_wallet) {
+                        Ok(instructions) => instructions,
+                        Err(error) => {
+                            log::debug!("failed to parse token subscription logs: {error}");
+                            continue;
+                        }
+                    };
                     for instruction in instructions {
                         match instruction {
                             DexInstruction::CreateToken(token_info) => {
@@ -86,14 +107,23 @@ where
                         }
                     }
                 }
-                None => {
-                    println!("Token subscription stream ended");
-                }
             }
+        }
+
+        if timeout(SUBSCRIPTION_SHUTDOWN_TIMEOUT, unsubscribe())
+            .await
+            .is_err()
+        {
+            log::warn!("token log unsubscribe timed out");
         }
     });
 
-    // Return subscription handle and unsubscribe logic
+    match ready_rx.await {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => return Err(Box::new(error)),
+        Err(error) => return Err(Box::new(error)),
+    }
+
     Ok(SubscriptionHandle {
         task,
         unsub_fn: Box::new(move || {

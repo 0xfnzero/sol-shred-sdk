@@ -45,7 +45,7 @@ Source/decode mode is selected with `ShredDecodeMode`. Native raw UDP shreds are
 | Area | Coverage |
 |------|----------|
 | Input | Raw UDP Solana shred payloads, or Jito-style ShredStream gRPC entries |
-| Decode | `ShredDecodeMode::RawUdp` uses `solana-ledger` `Shred` parsing, Reed-Solomon recovery, `Shredder::deshred`, and bincode `Vec<Entry>` decode; `ShredDecodeMode::JitoGrpc` receives prebuilt entry batches |
+| Decode | `ShredDecodeMode::RawUdp` uses `solana-ledger` `Shred` parsing, Reed-Solomon recovery, `Shredder::deshred`, and wincode `Vec<Entry>` decode; `ShredDecodeMode::JitoGrpc` receives prebuilt entry batches |
 | Transactions | Entry-to-transaction flattening with slot context |
 | Events | `DexEvent` parser migrated from `sol-parser-sdk` ShredStream handling |
 | Extensibility | `TransactionEventParser` trait for custom parser plug-ins |
@@ -88,7 +88,7 @@ Add the dependency to your `Cargo.toml`:
 
 ```toml
 # Add to your Cargo.toml
-sol-shred-sdk = { path = "./sol-shred-sdk", version = "3.0.3" }
+sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.0" }
 ```
 
 ### Use crates.io
@@ -96,7 +96,7 @@ sol-shred-sdk = { path = "./sol-shred-sdk", version = "3.0.3" }
 ```toml
 # Add to your Cargo.toml
 [dependencies]
-sol-shred-sdk = "3.0.3"
+sol-shred-sdk = "4.0.0"
 ```
 
 ## PumpSwap Effective Quote Reserves
@@ -268,7 +268,7 @@ RAW_SHRED_BENCH_ITERS=10000 cargo test --release --lib bench_decode_generated_sh
 Current local reference result:
 
 ```text
-packets_per_sec=1172196 slots_per_sec=36631 tx_per_sec=1172196
+packets_per_sec=3276089 slots_per_sec=102378 tx_per_sec=3276089
 ```
 
 ## License

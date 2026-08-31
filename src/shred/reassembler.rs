@@ -7,7 +7,7 @@ use std::time::Instant;
 use lru::LruCache;
 use reed_solomon_erasure::galois_8::ReedSolomon;
 use solana_entry::entry::Entry;
-use solana_ledger::shred::{Payload, ReedSolomonCache, Shred, ShredId, Shredder};
+use solana_ledger::shred::{Payload, Shred, ShredId, Shredder};
 use solana_sdk::hash::{hashv, Hash};
 
 use super::config::RawShredConfig;
@@ -26,6 +26,8 @@ const MERKLE_PROOF_ENTRY_LEN: usize = 20;
 const RETRANSMITTER_SIGNATURE_LEN: usize = 64;
 const RS_CACHE_CAPACITY: usize = 32;
 const MAX_SHREDS_PER_FEC_SET: usize = 256;
+// Bounds wire-payload retention to roughly 80 MiB plus map overhead.
+const MAX_BUFFERED_SHREDS: usize = 65_536;
 const MERKLE_HASH_PREFIX_LEAF: &[u8] = b"\x00SOLANA_MERKLE_SHREDS_LEAF";
 const MERKLE_HASH_PREFIX_NODE: &[u8] = b"\x01SOLANA_MERKLE_SHREDS_NODE";
 
@@ -51,8 +53,10 @@ pub struct ShredDecoderStats {
 }
 
 struct DataShred {
-    payload: Vec<u8>,
+    payload: Payload,
     fec_set_index: u32,
+    version: u16,
+    variant: Option<MerkleVariant>,
     data_complete: bool,
     last_in_slot: bool,
 }
@@ -63,6 +67,8 @@ struct CodingSet {
     num_coding_shreds: usize,
     first_coding_index: u32,
     version: u16,
+    variant: MerkleVariant,
+    merkle_root: Hash,
     recovery_failed: bool,
 }
 
@@ -94,7 +100,7 @@ pub struct RawShredDecoder {
     forward_watermark: Option<u64>,
     slots: BTreeMap<u64, SlotBuffer>,
     coding: BTreeMap<(u64, u32), CodingSet>,
-    rs_cache: ReedSolomonCache,
+    buffered_shreds: usize,
     merkle_rs_cache: LruCache<(usize, usize), ReedSolomon>,
     stats: ShredDecoderStats,
 }
@@ -106,7 +112,7 @@ impl RawShredDecoder {
             forward_watermark: None,
             slots: BTreeMap::new(),
             coding: BTreeMap::new(),
-            rs_cache: ReedSolomonCache::default(),
+            buffered_shreds: 0,
             merkle_rs_cache: LruCache::new(NonZeroUsize::new(RS_CACHE_CAPACITY).unwrap()),
             stats: ShredDecoderStats::default(),
         }
@@ -190,6 +196,8 @@ impl RawShredDecoder {
             Vec::new()
         };
         self.note_emitted(&out);
+        self.enforce_buffer_limit(MAX_BUFFERED_SHREDS);
+        self.debug_assert_buffered_count();
         out
     }
 
@@ -197,16 +205,19 @@ impl RawShredDecoder {
         let timeout = self.config.reassembly_gap_timeout;
         let mut removed = 0usize;
 
-        self.slots.retain(|_, buffer| {
-            let keep = buffer.terminal_complete
-                || now.saturating_duration_since(buffer.last_activity) <= timeout;
-            if !keep {
-                removed += 1;
-            }
-            keep
-        });
-        self.coding
-            .retain(|(slot, _), _| self.slots.contains_key(slot));
+        let stale_slots: Vec<u64> = self
+            .slots
+            .iter()
+            .filter_map(|(&slot, buffer)| {
+                (!buffer.terminal_complete
+                    && now.saturating_duration_since(buffer.last_activity) > timeout)
+                    .then_some(slot)
+            })
+            .collect();
+        for slot in stale_slots {
+            removed += usize::from(self.remove_slot_state(slot));
+        }
+        self.debug_assert_buffered_count();
 
         removed
     }
@@ -223,17 +234,13 @@ impl RawShredDecoder {
             return Ok(Shred::new_from_serialized_shred(slice.to_vec())?);
         }
 
-        match Shred::new_from_serialized_shred(packet.to_vec()) {
-            Ok(shred) => Ok(shred),
-            Err(error) => {
-                if packet.len() >= 64 + MERKLE_SHRED_SERIALIZED_LEN
-                    && packet[..64].iter().all(|&byte| byte == 0)
-                {
-                    return Ok(Shred::new_from_serialized_shred(packet[64..].to_vec())?);
-                }
-                Err(error.into())
-            }
+        if packet.len() >= 64 + MERKLE_SHRED_SERIALIZED_LEN
+            && packet[..64].iter().all(|&byte| byte == 0)
+        {
+            return Ok(Shred::new_from_serialized_shred(packet[64..].to_vec())?);
         }
+
+        Ok(Shred::new_from_serialized_shred(packet.to_vec())?)
     }
 
     fn note_emitted(&mut self, batches: &[ShredEntryBatch]) {
@@ -266,10 +273,66 @@ impl RawShredDecoder {
             if touch_slot <= min_slot {
                 return false;
             }
-            self.slots.remove(&min_slot);
-            self.coding.retain(|(slot, _), _| *slot != min_slot);
+            self.remove_slot_state(min_slot);
         }
         true
+    }
+
+    fn remove_slot_state(&mut self, slot: u64) -> bool {
+        let Some(buffer) = self.slots.remove(&slot) else {
+            return false;
+        };
+        let mut removed_shreds = buffer.data.len();
+        self.coding.retain(|(coding_slot, _), set| {
+            if *coding_slot == slot {
+                removed_shreds = removed_shreds.saturating_add(set.shreds.len());
+                false
+            } else {
+                true
+            }
+        });
+        self.buffered_shreds = self.buffered_shreds.saturating_sub(removed_shreds);
+        true
+    }
+
+    fn remove_coding_set(&mut self, slot: u64, fec_set: u32) {
+        if let Some(set) = self.coding.remove(&(slot, fec_set)) {
+            self.buffered_shreds = self.buffered_shreds.saturating_sub(set.shreds.len());
+        }
+    }
+
+    fn enforce_buffer_limit(&mut self, limit: usize) {
+        while self.buffered_shreds > limit {
+            let Some(oldest_slot) = self
+                .slots
+                .iter()
+                .filter(|(_, buffer)| !buffer.terminal_complete)
+                .min_by_key(|(slot, buffer)| (buffer.last_activity, **slot))
+                .map(|(&slot, _)| slot)
+            else {
+                break;
+            };
+            if !self.remove_slot_state(oldest_slot) {
+                break;
+            }
+        }
+    }
+
+    #[inline]
+    fn debug_assert_buffered_count(&self) {
+        debug_assert_eq!(
+            self.buffered_shreds,
+            self.slots
+                .values()
+                .map(|buffer| buffer.data.len())
+                .sum::<usize>()
+                .saturating_add(
+                    self.coding
+                        .values()
+                        .map(|set| set.shreds.len())
+                        .sum::<usize>()
+                )
+        );
     }
 
     fn insert_data_shred(&mut self, slot: u64, shred: Shred) -> bool {
@@ -283,15 +346,20 @@ impl RawShredDecoder {
         let data_complete = shred.data_complete();
         let last_in_slot = shred.last_in_slot();
         let fec_set_index = shred.fec_set_index();
-        let payload = Payload::unwrap_or_clone(shred.into_payload());
+        let version = shred.version();
+        let variant = merkle_variant(shred.payload().as_ref());
+        let payload = shred.into_payload();
         match buffer.data.entry(index) {
             BTreeEntry::Vacant(entry) => {
                 entry.insert(DataShred {
                     payload,
                     fec_set_index,
+                    version,
+                    variant,
                     data_complete,
                     last_in_slot,
                 });
+                self.buffered_shreds = self.buffered_shreds.saturating_add(1);
                 true
             }
             BTreeEntry::Occupied(entry) if entry.get().payload == payload => {
@@ -332,6 +400,15 @@ impl RawShredDecoder {
             self.stats.duplicate_shreds += 1;
             return false;
         }
+        let Some(variant) = merkle_variant(shred.payload().as_ref()).filter(|variant| variant.code)
+        else {
+            self.stats.invalid_fec_shreds += 1;
+            return false;
+        };
+        let Ok(merkle_root) = shred.merkle_root() else {
+            self.stats.invalid_fec_shreds += 1;
+            return false;
+        };
 
         let key = (slot, fec_set);
         let set = self.coding.entry(key).or_insert_with(|| CodingSet {
@@ -340,12 +417,16 @@ impl RawShredDecoder {
             num_coding_shreds: usize::from(num_coding_shreds),
             first_coding_index,
             version: shred.version(),
+            variant,
+            merkle_root,
             recovery_failed: false,
         });
         if set.num_data_shreds != usize::from(num_data_shreds)
             || set.num_coding_shreds != usize::from(num_coding_shreds)
             || set.first_coding_index != first_coding_index
             || set.version != shred.version()
+            || set.variant != variant
+            || set.merkle_root != merkle_root
         {
             self.stats.invalid_fec_shreds += 1;
             return false;
@@ -361,11 +442,7 @@ impl RawShredDecoder {
             return false;
         }
         if let Some(existing) = set.shreds.values().next() {
-            let existing_variant = merkle_variant(existing.payload().as_ref());
-            let incoming_variant = merkle_variant(shred.payload().as_ref());
-            if existing_variant != incoming_variant
-                || (incoming_variant.is_some() && existing.signature() != shred.signature())
-            {
+            if existing.signature() != shred.signature() {
                 self.stats.invalid_fec_shreds += 1;
                 return false;
             }
@@ -373,6 +450,7 @@ impl RawShredDecoder {
         match set.shreds.entry(id) {
             HashEntry::Vacant(entry) => {
                 entry.insert(shred);
+                self.buffered_shreds = self.buffered_shreds.saturating_add(1);
                 true
             }
             HashEntry::Occupied(_) => unreachable!("coding shred ID checked above"),
@@ -389,7 +467,7 @@ impl RawShredDecoder {
         let num_data_shreds = coding_set.num_data_shreds;
         let Some(fec_end) = fec_set.checked_add(num_data_shreds as u32) else {
             self.stats.invalid_fec_shreds += 1;
-            self.coding.remove(&(slot, fec_set));
+            self.remove_coding_set(slot, fec_set);
             return false;
         };
         let data_count = self
@@ -408,7 +486,7 @@ impl RawShredDecoder {
             })
             .unwrap_or_default();
         if data_count >= num_data_shreds {
-            self.coding.remove(&(slot, fec_set));
+            self.remove_coding_set(slot, fec_set);
             return false;
         }
         if data_count + coding_set.shreds.len() < num_data_shreds {
@@ -416,17 +494,7 @@ impl RawShredDecoder {
         }
 
         self.stats.fec_recover_attempts += 1;
-        let is_merkle = coding_set
-            .shreds
-            .values()
-            .next()
-            .and_then(|shred| merkle_variant(shred.payload().as_ref()))
-            .is_some();
-        let recovered = if is_merkle {
-            self.recover_merkle_data(slot, fec_set, fec_end)
-        } else {
-            self.recover_legacy_data(slot, fec_set, fec_end)
-        };
+        let recovered = self.recover_merkle_data(slot, fec_set, fec_end);
 
         match recovered {
             Ok(recovered) => {
@@ -444,9 +512,12 @@ impl RawShredDecoder {
                         entry.insert(DataShred {
                             payload: recovered.payload,
                             fec_set_index: fec_set,
+                            version: recovered.version,
+                            variant: Some(recovered.variant),
                             data_complete: recovered.data_complete,
                             last_in_slot: recovered.last_in_slot,
                         });
+                        self.buffered_shreds = self.buffered_shreds.saturating_add(1);
                         self.stats.fec_recovered_data_shreds += 1;
                         inserted = true;
                     }
@@ -468,7 +539,7 @@ impl RawShredDecoder {
                     })
                     .unwrap_or_default();
                 if recovered_all_data {
-                    self.coding.remove(&(slot, fec_set));
+                    self.remove_coding_set(slot, fec_set);
                 }
                 inserted
             }
@@ -482,56 +553,6 @@ impl RawShredDecoder {
         }
     }
 
-    fn recover_legacy_data(
-        &self,
-        slot: u64,
-        fec_set: u32,
-        fec_end: u32,
-    ) -> Result<Vec<RecoveredDataShred>, ()> {
-        let mut shreds = Vec::new();
-        if let Some(buffer) = self.slots.get(&slot) {
-            for data in buffer.data.values() {
-                if data.fec_set_index == fec_set
-                    && solana_ledger::shred::layout::get_index(&data.payload)
-                        .is_some_and(|index| index < fec_end)
-                {
-                    let shred =
-                        Shred::new_from_serialized_shred(data.payload.clone()).map_err(|_| ())?;
-                    if shred.slot() != slot
-                        || shred.fec_set_index() != fec_set
-                        || shred.version() != self.coding[&(slot, fec_set)].version
-                    {
-                        return Err(());
-                    }
-                    shreds.push(shred);
-                }
-            }
-        }
-        if let Some(coding) = self.coding.get(&(slot, fec_set)) {
-            shreds.extend(coding.shreds.values().cloned());
-        }
-
-        Shredder::try_recovery(shreds, &self.rs_cache)
-            .map_err(|_| ())?
-            .into_iter()
-            .filter(Shred::is_data)
-            .map(|shred| {
-                let index = shred.index();
-                if shred.slot() != slot || shred.fec_set_index() != fec_set || index >= fec_end {
-                    return Err(());
-                }
-                let data_complete = shred.data_complete();
-                let last_in_slot = shred.last_in_slot();
-                Ok(RecoveredDataShred {
-                    index,
-                    payload: Payload::unwrap_or_clone(shred.into_payload()),
-                    data_complete,
-                    last_in_slot,
-                })
-            })
-            .collect()
-    }
-
     fn recover_merkle_data(
         &mut self,
         slot: u64,
@@ -542,13 +563,7 @@ impl RawShredDecoder {
         let num_data = coding_set.num_data_shreds;
         let num_coding = coding_set.num_coding_shreds;
         let total = num_data.checked_add(num_coding).ok_or(())?;
-        let variant = coding_set
-            .shreds
-            .values()
-            .next()
-            .and_then(|shred| merkle_variant(shred.payload().as_ref()))
-            .filter(|variant| variant.is_code())
-            .ok_or(())?;
+        let variant = coding_set.variant;
         let shard_len = variant.erasure_shard_len().ok_or(())?;
         let mut shards = vec![None; total];
         let expected_signature = coding_set
@@ -558,13 +573,8 @@ impl RawShredDecoder {
             .map(Shred::signature)
             .ok_or(())?;
         let expected_version = coding_set.version;
-        let expected_root = coding_set
-            .shreds
-            .values()
-            .next()
-            .and_then(|shred| shred.merkle_root().ok())
-            .ok_or(())?;
-        let chained_root = if variant.chained {
+        let expected_root = coding_set.merkle_root;
+        let chained_root: Option<[u8; MERKLE_ROOT_LEN]> = if variant.chained {
             let offset = SHRED_CODE_HEADER_LEN.checked_add(shard_len).ok_or(())?;
             Some(
                 coding_set
@@ -573,11 +583,13 @@ impl RawShredDecoder {
                     .next()
                     .and_then(|shred| shred.payload().get(offset..offset + MERKLE_ROOT_LEN))
                     .ok_or(())?
-                    .to_vec(),
+                    .try_into()
+                    .map_err(|_| ())?,
             )
         } else {
             None
         };
+        let chained_root_slice = chained_root.as_ref().map(<[u8; MERKLE_ROOT_LEN]>::as_slice);
 
         for shred in coding_set.shreds.values() {
             let payload = shred.payload().as_ref();
@@ -591,8 +603,7 @@ impl RawShredDecoder {
             }
             if variant.chained {
                 let offset = SHRED_CODE_HEADER_LEN.checked_add(shard_len).ok_or(())?;
-                if shred.payload().get(offset..offset + MERKLE_ROOT_LEN) != chained_root.as_deref()
-                {
+                if shred.payload().get(offset..offset + MERKLE_ROOT_LEN) != chained_root_slice {
                     return Err(());
                 }
             }
@@ -613,16 +624,14 @@ impl RawShredDecoder {
                 if data.fec_set_index != fec_set {
                     continue;
                 }
-                let parsed =
-                    Shred::new_from_serialized_shred(data.payload.clone()).map_err(|_| ())?;
                 let index = solana_ledger::shred::layout::get_index(&data.payload).ok_or(())?;
                 if index >= fec_end {
                     continue;
                 }
-                if parsed.slot() != slot
-                    || parsed.version() != expected_version
-                    || parsed.fec_set_index() != fec_set
-                    || merkle_variant(&data.payload) != Some(variant.as_data())
+                if solana_ledger::shred::layout::get_slot(&data.payload) != Some(slot)
+                    || data.version != expected_version
+                    || data.fec_set_index != fec_set
+                    || data.variant != Some(variant.as_data())
                 {
                     return Err(());
                 }
@@ -630,8 +639,7 @@ impl RawShredDecoder {
                     let offset = RETRANSMITTER_SIGNATURE_LEN
                         .checked_add(shard_len)
                         .ok_or(())?;
-                    if data.payload.get(offset..offset + MERKLE_ROOT_LEN) != chained_root.as_deref()
-                    {
+                    if data.payload.get(offset..offset + MERKLE_ROOT_LEN) != chained_root_slice {
                         return Err(());
                     }
                 }
@@ -678,13 +686,14 @@ impl RawShredDecoder {
                         .get(RETRANSMITTER_SIGNATURE_LEN..SHRED_CODE_HEADER_LEN)
                 })
                 .ok_or(())?,
-            chained_root.as_deref(),
+            chained_root_slice,
         )?;
         if recovered_root != expected_root {
             return Err(());
         }
 
-        let mut recovered = Vec::new();
+        let mut recovered =
+            Vec::with_capacity(present_data.iter().filter(|present| !**present).count());
         for (position, was_present) in present_data.into_iter().enumerate() {
             if was_present {
                 continue;
@@ -697,7 +706,7 @@ impl RawShredDecoder {
             payload[..RETRANSMITTER_SIGNATURE_LEN].copy_from_slice(expected_signature.as_ref());
             payload[RETRANSMITTER_SIGNATURE_LEN..RETRANSMITTER_SIGNATURE_LEN + shard_len]
                 .copy_from_slice(&shard);
-            if let Some(chained_root) = chained_root.as_deref() {
+            if let Some(chained_root) = chained_root_slice {
                 let offset = RETRANSMITTER_SIGNATURE_LEN + shard_len;
                 payload[offset..offset + MERKLE_ROOT_LEN].copy_from_slice(chained_root);
             }
@@ -710,6 +719,7 @@ impl RawShredDecoder {
             {
                 return Err(());
             }
+            let payload: Payload = payload.into();
             let parsed = Shred::new_from_serialized_shred(payload.clone()).map_err(|_| ())?;
             if parsed.fec_set_index() != fec_set || parsed.version() != expected_version {
                 return Err(());
@@ -719,6 +729,8 @@ impl RawShredDecoder {
             recovered.push(RecoveredDataShred {
                 index,
                 payload,
+                version: expected_version,
+                variant: variant.as_data(),
                 data_complete: flags & 0x40 != 0,
                 last_in_slot: flags & 0xc0 == 0xc0,
             });
@@ -729,6 +741,7 @@ impl RawShredDecoder {
     fn drain_ready_segments(&mut self, slot: u64) -> Vec<ShredEntryBatch> {
         let mut out = Vec::new();
         let mut terminal_complete = false;
+        let mut removed_data_shreds = 0usize;
 
         {
             let Some(buffer) = self.slots.get_mut(&slot) else {
@@ -787,25 +800,35 @@ impl RawShredDecoder {
                 buffer.next_data_index = complete_index.saturating_add(1);
                 if !decoded {
                     for index in start_index..=complete_index {
-                        buffer.data.remove(&index);
+                        removed_data_shreds += usize::from(buffer.data.remove(&index).is_some());
                     }
                 } else {
+                    let previous_len = buffer.data.len();
                     buffer.data = buffer.data.split_off(&buffer.next_data_index);
+                    removed_data_shreds += previous_len.saturating_sub(buffer.data.len());
                 }
                 if segment_terminal {
                     terminal_complete = true;
                     buffer.terminal_complete = true;
+                    removed_data_shreds = removed_data_shreds.saturating_add(buffer.data.len());
                     buffer.data.clear();
                     break;
                 }
             }
         }
+        self.buffered_shreds = self.buffered_shreds.saturating_sub(removed_data_shreds);
 
         let next_data_index = self.slots[&slot].next_data_index;
+        let mut removed_coding_shreds = 0usize;
         self.coding.retain(|(coding_slot, fec_set), set| {
-            *coding_slot != slot
-                || (!terminal_complete && *fec_set >= next_data_index && set.num_data_shreds > 0)
+            let keep = *coding_slot != slot
+                || (!terminal_complete && *fec_set >= next_data_index && set.num_data_shreds > 0);
+            if !keep {
+                removed_coding_shreds = removed_coding_shreds.saturating_add(set.shreds.len());
+            }
+            keep
         });
+        self.buffered_shreds = self.buffered_shreds.saturating_sub(removed_coding_shreds);
         if terminal_complete {
             self.slots
                 .get_mut(&slot)
@@ -844,7 +867,7 @@ impl RawShredDecoder {
                 .get(&index)
                 .expect("contiguous data range checked")
                 .payload
-                .as_slice()
+                .as_ref()
         });
         let bytes = match Shredder::deshred(payloads) {
             Ok(bytes) => bytes,
@@ -856,7 +879,7 @@ impl RawShredDecoder {
 
         debug_assert_eq!(bytes.len(), deshred_len);
 
-        match bincode::deserialize::<Vec<Entry>>(&bytes) {
+        match wincode::deserialize_exact::<Vec<Entry>>(&bytes) {
             Ok(entries) => Ok(entries),
             Err(error) => {
                 log::trace!(
@@ -877,7 +900,9 @@ enum ChunkDecodeError {
 
 struct RecoveredDataShred {
     index: u32,
-    payload: Vec<u8>,
+    payload: Payload,
+    version: u16,
+    variant: MerkleVariant,
     data_complete: bool,
     last_in_slot: bool,
 }
@@ -891,10 +916,6 @@ struct MerkleVariant {
 }
 
 impl MerkleVariant {
-    fn is_code(self) -> bool {
-        self.code
-    }
-
     fn as_data(self) -> Self {
         Self {
             code: false,
@@ -1045,12 +1066,10 @@ impl Default for RawShredDecoder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solana_keypair::{Keypair, Signer};
     use solana_ledger::shred::{ProcessShredsStats, ReedSolomonCache, Shredder};
-    use solana_sdk::{
-        hash::Hash,
-        signature::{Keypair, Signer},
-        system_transaction,
-    };
+    use solana_sdk::hash::Hash;
+    use solana_system_transaction as system_transaction;
 
     fn make_entries(count: usize) -> Vec<Entry> {
         (0..count)
@@ -1077,14 +1096,13 @@ mod tests {
     ) -> (Vec<Shred>, Vec<Shred>) {
         Shredder::new(slot, slot.saturating_sub(1), 0, 0)
             .unwrap()
-            .entries_to_shreds(
+            .entries_to_merkle_shreds_for_tests(
                 &Keypair::new(),
                 entries,
                 is_last_in_slot,
-                None,
+                Hash::default(),
                 next_data_index,
                 next_code_index,
-                true,
                 &ReedSolomonCache::default(),
                 &mut ProcessShredsStats::default(),
             )
@@ -1097,23 +1115,22 @@ mod tests {
     ) -> (Vec<Shred>, Vec<Shred>) {
         Shredder::new(slot, slot.saturating_sub(1), 0, 0)
             .unwrap()
-            .entries_to_shreds(
+            .entries_to_merkle_shreds_for_tests(
                 &Keypair::new(),
                 entries,
                 is_last_in_slot,
-                Some(Hash::new_unique()),
+                Hash::new_unique(),
                 0,
                 0,
-                true,
                 &ReedSolomonCache::default(),
                 &mut ProcessShredsStats::default(),
             )
     }
 
     #[test]
-    fn bincode_entry_decode_roundtrips_empty_vec() {
-        let bytes = bincode::serialize(&Vec::<Entry>::new()).unwrap();
-        let entries: Vec<Entry> = bincode::deserialize(&bytes).unwrap();
+    fn wincode_entry_decode_roundtrips_empty_vec() {
+        let bytes = wincode::serialize(&Vec::<Entry>::new()).unwrap();
+        let entries: Vec<Entry> = wincode::deserialize(&bytes).unwrap();
         assert!(entries.is_empty());
     }
 
@@ -1155,14 +1172,13 @@ mod tests {
             system_transaction::transfer(&from_keypair, &to_keypair.pubkey(), 1, Hash::default());
         let entries = vec![Entry::new(&Hash::default(), 1, vec![tx.clone()])];
 
-        let (data_shreds, _coding_shreds) = shredder.entries_to_shreds(
+        let (data_shreds, _coding_shreds) = shredder.entries_to_merkle_shreds_for_tests(
             &leader_keypair,
             &entries,
             true,
-            None,
+            Hash::default(),
             0,
             0,
-            true,
             &ReedSolomonCache::default(),
             &mut ProcessShredsStats::default(),
         );
@@ -1217,6 +1233,7 @@ mod tests {
             .coding
             .keys()
             .any(|(coding_slot, _)| *coding_slot == 42));
+        assert_eq!(decoder.buffered_shreds, 0);
     }
 
     #[test]
@@ -1241,6 +1258,31 @@ mod tests {
         assert_eq!(decoder.stats().fec_recovered_data_shreds, 1);
         assert_eq!(batches.len(), 1);
         assert_eq!(batches[0].entries.len(), entries.len());
+        assert_eq!(decoder.buffered_shreds, 0);
+    }
+
+    #[test]
+    fn buffered_shred_limit_evicts_oldest_incomplete_slot() {
+        let entries = make_entries(1);
+        let (mut old_shreds, _) = make_shreds(41, &entries, false, 0, 0);
+        let (mut new_shreds, _) = make_shreds(42, &entries, false, 0, 0);
+        let now = Instant::now();
+        let mut decoder = RawShredDecoder::new(RawShredConfig::default());
+        decoder.slots.insert(41, SlotBuffer::new(now));
+        decoder.slots.insert(
+            42,
+            SlotBuffer::new(now + std::time::Duration::from_millis(1)),
+        );
+
+        assert!(decoder.insert_data_shred(41, old_shreds.remove(0)));
+        assert!(decoder.insert_data_shred(42, new_shreds.remove(0)));
+        assert_eq!(decoder.buffered_shreds, 2);
+
+        decoder.enforce_buffer_limit(1);
+
+        assert!(!decoder.slots.contains_key(&41));
+        assert!(decoder.slots.contains_key(&42));
+        assert_eq!(decoder.buffered_shreds, 1);
     }
 
     #[test]
@@ -1337,6 +1379,27 @@ mod tests {
     }
 
     #[test]
+    fn mismatched_coding_root_is_rejected_before_joining_set() {
+        let entries = make_entries(12);
+        let (data_shreds, coding_shreds) = make_shreds(42, &entries, true, 0, 0);
+        let mut decoder = RawShredDecoder::new(RawShredConfig::default());
+        let now = Instant::now();
+        for shred in data_shreds.iter().take(30) {
+            decoder.push_packet(shred.payload().as_ref(), now);
+        }
+        decoder.push_packet(coding_shreds[0].payload().as_ref(), now);
+
+        let mut corrupted = coding_shreds[1].payload().as_ref().to_vec();
+        corrupted[SHRED_CODE_HEADER_LEN] ^= 1;
+        let corrupted = Shred::new_from_serialized_shred(corrupted).expect("sanitized shred");
+        decoder.push_packet(corrupted.payload().as_ref(), now);
+
+        assert_eq!(decoder.stats().invalid_fec_shreds, 1);
+        assert_eq!(decoder.coding[&(42, 0)].shreds.len(), 1);
+        assert_eq!(decoder.stats().fec_recover_attempts, 0);
+    }
+
+    #[test]
     fn invalid_coding_cardinality_is_rejected() {
         let entries = make_entries(1);
         let (_, coding_shreds) = make_shreds(42, &entries, true, 0, 0);
@@ -1415,6 +1478,26 @@ mod tests {
     }
 
     #[test]
+    fn automatic_zero_signature_prefix_decodes_without_config() {
+        let entries = make_entries(2);
+        let (data_shreds, _) = make_shreds(42, &entries, true, 0, 0);
+        let mut decoder = RawShredDecoder::new(RawShredConfig::default());
+        let now = Instant::now();
+        let mut batches = Vec::new();
+
+        for shred in data_shreds {
+            let mut packet = Vec::with_capacity(64 + shred.payload().len());
+            packet.resize(64, 0);
+            packet.extend_from_slice(shred.payload().as_ref());
+            batches.extend(decoder.push_packet(&packet, now));
+        }
+
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].entries.len(), entries.len());
+        assert_eq!(decoder.stats().parse_errors, 0);
+    }
+
+    #[test]
     fn oversized_complete_segment_is_dropped_once() {
         let entries = make_entries(2);
         let (data_shreds, _) = make_shreds(42, &entries, true, 0, 0);
@@ -1475,14 +1558,13 @@ mod tests {
                 Hash::default(),
             );
             let entries = vec![Entry::new(&Hash::default(), 1, vec![tx])];
-            let (data_shreds, _coding_shreds) = shredder.entries_to_shreds(
+            let (data_shreds, _coding_shreds) = shredder.entries_to_merkle_shreds_for_tests(
                 &leader_keypair,
                 &entries,
                 true,
-                None,
+                Hash::default(),
                 0,
                 0,
-                true,
                 &ReedSolomonCache::default(),
                 &mut ProcessShredsStats::default(),
             );
@@ -1531,14 +1613,13 @@ mod tests {
             })
             .collect();
 
-        let (data_shreds, _coding_shreds) = shredder.entries_to_shreds(
+        let (data_shreds, _coding_shreds) = shredder.entries_to_merkle_shreds_for_tests(
             &leader_keypair,
             &entries,
             true,
-            None,
+            Hash::default(),
             0,
             0,
-            true,
             &ReedSolomonCache::default(),
             &mut ProcessShredsStats::default(),
         );
@@ -1577,14 +1658,13 @@ mod tests {
             })
             .collect();
 
-        let (data_shreds, _coding_shreds) = shredder.entries_to_shreds(
+        let (data_shreds, _coding_shreds) = shredder.entries_to_merkle_shreds_for_tests(
             &leader_keypair,
             &entries,
             true,
-            None,
+            Hash::default(),
             0,
             0,
-            true,
             &ReedSolomonCache::default(),
             &mut ProcessShredsStats::default(),
         );

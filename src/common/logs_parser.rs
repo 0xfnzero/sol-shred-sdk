@@ -1,5 +1,3 @@
-use std::str::FromStr;
-
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 
 use crate::common::error::{ClientError, ClientResult};
@@ -32,112 +30,33 @@ where
 
 // Add parsing function
 pub fn parse_create_token_data(data: &str) -> ClientResult<CreateTokenInfo> {
-    // First do base64 decoding
     let decoded = BASE64
         .decode(data)
         .map_err(|e| ClientError::Other(format!("Failed to decode base64: {}", e)))?;
 
-    // Skip prefix bytes (if any)
     let mut cursor = if decoded.len() > 8 { 8 } else { 0 };
-
-    // Read name length and name
-    if cursor + 4 > decoded.len() {
-        return Err(ClientError::Other(
-            "Data too short for name length".to_string(),
-        ));
-    }
-    let name_len = read_u32(&decoded[cursor..]) as usize;
-    cursor += 4;
-
-    if cursor + name_len > decoded.len() {
-        return Err(ClientError::Other(format!(
-            "Data too short for name: need {} bytes",
-            name_len
-        )));
-    }
-    let name = String::from_utf8(decoded[cursor..cursor + name_len].to_vec())
-        .map_err(|e| ClientError::Other(format!("Invalid UTF-8 in name: {}", e)))?;
-    cursor += name_len;
-
-    // Read symbol length and symbol
-    if cursor + 4 > decoded.len() {
-        return Err(ClientError::Other(
-            "Data too short for symbol length".to_string(),
-        ));
-    }
-    let symbol_len = read_u32(&decoded[cursor..]) as usize;
-    cursor += 4;
-
-    if cursor + symbol_len > decoded.len() {
-        return Err(ClientError::Other(format!(
-            "Data too short for symbol: need {} bytes",
-            symbol_len
-        )));
-    }
-    let symbol = String::from_utf8(decoded[cursor..cursor + symbol_len].to_vec())
-        .map_err(|e| ClientError::Other(format!("Invalid UTF-8 in symbol: {}", e)))?;
-    cursor += symbol_len;
-
-    // Read URI length and URI
-    if cursor + 4 > decoded.len() {
-        return Err(ClientError::Other(
-            "Data too short for URI length".to_string(),
-        ));
-    }
-    let uri_len = read_u32(&decoded[cursor..]) as usize;
-    cursor += 4;
-
-    if cursor + uri_len > decoded.len() {
-        return Err(ClientError::Other(format!(
-            "Data too short for URI: need {} bytes",
-            uri_len
-        )));
-    }
-    let uri = String::from_utf8(decoded[cursor..cursor + uri_len].to_vec())
-        .map_err(|e| ClientError::Other(format!("Invalid UTF-8 in uri: {}", e)))?;
-    cursor += uri_len;
-
-    // Make sure there is enough data to read public keys
-    if cursor + 32 * 4 > decoded.len() {
-        return Err(ClientError::Other(
-            "Data too short for public keys".to_string(),
-        ));
-    }
-
-    // Parse Mint Public Key
-    let mint = bs58::encode(&decoded[cursor..cursor + 32]).into_string();
-    cursor += 32;
-
-    // Parse Bonding Curve Public Key
-    let bonding_curve = bs58::encode(&decoded[cursor..cursor + 32]).into_string();
-    cursor += 32;
-
-    // Parse User Public Key
-    let user = bs58::encode(&decoded[cursor..cursor + 32]).into_string();
-    cursor += 32;
-    // Parse Creator Public Key
-    let creator = bs58::encode(&decoded[cursor..cursor + 32]).into_string();
+    let name = read_borsh_string(&decoded, &mut cursor, "name")?;
+    let symbol = read_borsh_string(&decoded, &mut cursor, "symbol")?;
+    let uri = read_borsh_string(&decoded, &mut cursor, "uri")?;
+    let mint = read_pubkey(&decoded, &mut cursor, "mint")?;
+    let bonding_curve = read_pubkey(&decoded, &mut cursor, "bonding curve")?;
+    let user = read_pubkey(&decoded, &mut cursor, "user")?;
+    let creator = read_pubkey(&decoded, &mut cursor, "creator")?;
 
     Ok(CreateTokenInfo {
         slot: 0,
         name,
         symbol,
         uri,
-        creator: Pubkey::from_str(&creator).unwrap(),
-        mint: Pubkey::from_str(&mint).unwrap(),
-        bonding_curve: Pubkey::from_str(&bonding_curve).unwrap(),
-        user: Pubkey::from_str(&user).unwrap(),
+        creator,
+        mint,
+        bonding_curve,
+        user,
         unit_limit: 0,
         unit_price: 0,
         fee_merchant: "UNKNOWN".to_string(),
         fee: 0,
     })
-}
-
-fn read_u32(data: &[u8]) -> u32 {
-    let mut bytes = [0u8; 4];
-    bytes.copy_from_slice(&data[..4]);
-    u32::from_le_bytes(bytes)
 }
 
 pub fn parse_trade_data(data: &str) -> ClientResult<TradeInfo> {
@@ -146,53 +65,66 @@ pub fn parse_trade_data(data: &str) -> ClientResult<TradeInfo> {
         .decode(data)
         .map_err(|e| ClientError::Parse("Failed to decode base64".to_string(), e.to_string()))?;
 
-    let mut cursor = 8; // Skip prefix
+    const TRADE_DATA_LEN: usize = 8 + 32 + 8 + 8 + 1 + 32 + 8 * 5;
+    if decoded.len() < TRADE_DATA_LEN {
+        return Err(ClientError::InvalidData(format!(
+            "trade data too short: got {}, need at least {TRADE_DATA_LEN}",
+            decoded.len()
+        )));
+    }
 
-    // 1. Mint (32 bytes)
-    let mint = bs58::encode(&decoded[cursor..cursor + 32]).into_string();
+    let mut cursor = 8;
+
+    let mint = Pubkey::new_from_array(
+        decoded[cursor..cursor + 32]
+            .try_into()
+            .map_err(|_| ClientError::InvalidData("invalid mint public key length".to_string()))?,
+    );
     cursor += 32;
 
     // 2. Sol Amount (8 bytes)
-    let sol_amount = u64::from_le_bytes(decoded[cursor..cursor + 8].try_into().unwrap());
+    let sol_amount = read_u64_le(&decoded, cursor, "SOL amount")?;
     cursor += 8;
 
     // 3. Token Amount (8 bytes)
-    let token_amount = u64::from_le_bytes(decoded[cursor..cursor + 8].try_into().unwrap());
+    let token_amount = read_u64_le(&decoded, cursor, "token amount")?;
     cursor += 8;
 
     // 4. Is Buy (1 byte)
     let is_buy = decoded[cursor] != 0;
     cursor += 1;
 
-    // 5. User (32 bytes)
-    let user = bs58::encode(&decoded[cursor..cursor + 32]).into_string();
+    let user = Pubkey::new_from_array(
+        decoded[cursor..cursor + 32]
+            .try_into()
+            .map_err(|_| ClientError::InvalidData("invalid user public key length".to_string()))?,
+    );
     cursor += 32;
 
     // 6. Timestamp (8 bytes)
-    let timestamp = i64::from_le_bytes(decoded[cursor..cursor + 8].try_into().unwrap());
+    let timestamp = read_i64_le(&decoded, cursor, "timestamp")?;
     cursor += 8;
 
     // 7. Virtual Sol Reserves (8 bytes)
-    let virtual_sol_reserves = u64::from_le_bytes(decoded[cursor..cursor + 8].try_into().unwrap());
+    let virtual_sol_reserves = read_u64_le(&decoded, cursor, "virtual SOL reserves")?;
     cursor += 8;
 
     // 8. Virtual Token Reserves (8 bytes)
-    let virtual_token_reserves =
-        u64::from_le_bytes(decoded[cursor..cursor + 8].try_into().unwrap());
+    let virtual_token_reserves = read_u64_le(&decoded, cursor, "virtual token reserves")?;
     cursor += 8;
 
-    let real_sol_reserves = u64::from_le_bytes(decoded[cursor..cursor + 8].try_into().unwrap());
+    let real_sol_reserves = read_u64_le(&decoded, cursor, "real SOL reserves")?;
     cursor += 8;
 
-    let real_token_reserves = u64::from_le_bytes(decoded[cursor..cursor + 8].try_into().unwrap());
+    let real_token_reserves = read_u64_le(&decoded, cursor, "real token reserves")?;
 
     Ok(TradeInfo {
         slot: 0,
-        mint: Pubkey::from_str(&mint).unwrap(),
+        mint,
         sol_amount,
         token_amount,
         is_buy,
-        user: Pubkey::from_str(&user).unwrap(),
+        user,
         timestamp,
         virtual_sol_reserves,
         virtual_token_reserves,
@@ -202,81 +134,109 @@ pub fn parse_trade_data(data: &str) -> ClientResult<TradeInfo> {
 }
 
 fn current_timestamp_millis() -> i64 {
-    let duration = SystemTime::now()
+    SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .expect("Time went backwards");
+        .ok()
+        .and_then(|duration| i64::try_from(duration.as_millis()).ok())
+        .unwrap_or_default()
+}
 
-    duration.as_millis() as i64
+fn read_array<const N: usize>(data: &[u8], offset: usize, field: &str) -> ClientResult<[u8; N]> {
+    let end = offset
+        .checked_add(N)
+        .ok_or_else(|| ClientError::InvalidData(format!("{field} offset overflow")))?;
+    data.get(offset..end)
+        .ok_or_else(|| ClientError::InvalidData(format!("data too short for {field}")))?
+        .try_into()
+        .map_err(|_| ClientError::InvalidData(format!("invalid {field} length")))
+}
+
+fn read_u64_le(data: &[u8], offset: usize, field: &str) -> ClientResult<u64> {
+    Ok(u64::from_le_bytes(read_array(data, offset, field)?))
+}
+
+fn read_i64_le(data: &[u8], offset: usize, field: &str) -> ClientResult<i64> {
+    Ok(i64::from_le_bytes(read_array(data, offset, field)?))
+}
+
+fn read_pubkey(data: &[u8], offset: &mut usize, field: &str) -> ClientResult<Pubkey> {
+    let bytes = read_array(data, *offset, field)?;
+    *offset = offset
+        .checked_add(32)
+        .ok_or_else(|| ClientError::InvalidData(format!("{field} offset overflow")))?;
+    Ok(Pubkey::new_from_array(bytes))
+}
+
+fn instruction_account(
+    instruction: &CompiledInstruction,
+    accounts: &[Pubkey],
+    position: usize,
+) -> ClientResult<Pubkey> {
+    let account_index = instruction.accounts.get(position).copied().ok_or_else(|| {
+        ClientError::InvalidData(format!("instruction account {position} is missing"))
+    })?;
+    accounts
+        .get(usize::from(account_index))
+        .copied()
+        .ok_or_else(|| {
+            ClientError::InvalidData(format!(
+                "instruction account index {account_index} is out of bounds"
+            ))
+        })
+}
+
+fn read_borsh_string(data: &[u8], offset: &mut usize, field: &str) -> ClientResult<String> {
+    let length_end = offset
+        .checked_add(4)
+        .ok_or_else(|| ClientError::InvalidData(format!("{field} length offset overflow")))?;
+    let length_bytes = data
+        .get(*offset..length_end)
+        .ok_or_else(|| ClientError::InvalidData(format!("data too short for {field} length")))?;
+    let length = u32::from_le_bytes(
+        length_bytes
+            .try_into()
+            .map_err(|_| ClientError::InvalidData(format!("invalid {field} length encoding")))?,
+    ) as usize;
+    *offset = length_end;
+
+    let value_end = offset
+        .checked_add(length)
+        .ok_or_else(|| ClientError::InvalidData(format!("{field} length overflow")))?;
+    let value = data.get(*offset..value_end).ok_or_else(|| {
+        ClientError::InvalidData(format!("data too short for {field}: need {length} bytes"))
+    })?;
+    *offset = value_end;
+    String::from_utf8(value.to_vec())
+        .map_err(|error| ClientError::InvalidData(format!("invalid UTF-8 in {field}: {error}")))
 }
 
 pub fn parse_instruction_create_token_data(
     instruction: &CompiledInstruction,
     accounts: &[Pubkey],
 ) -> ClientResult<CreateTokenInfo> {
-    let data = instruction.data.clone();
-    if data.len() < 55 {
-        return Err(ClientError::InvalidData(format!(
-            "CREATE_TOKEN_IX 指令数据长度不足: 只有 {} 字节，需要至少55字节",
-            data.len()
-        )));
-    }
-
+    let data = &instruction.data;
     let mut offset = 8; // 跳过指令前缀
 
-    // 1. 解析 name
-    let name_len =
-        u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap_or([0, 0, 0, 0])) as usize;
-    offset += 4;
-    if name_len > 1000 || name_len == 0 {
-        println!("Debug: name_len 异常: {}", name_len);
-        return Err(ClientError::InvalidData(format!(
-            "name_len 异常: {}",
-            name_len
-        )));
-    }
-    // 添加这个检查，防止越界
-    if offset + name_len > data.len() {
-        println!(
-            "Debug: name 数据越界: offset={}, name_len={}, data_len={}",
-            offset,
-            name_len,
-            data.len()
-        );
-        return Err(ClientError::InvalidData("name 数据越界".to_string()));
-    }
-    let name = String::from_utf8_lossy(&data[offset..offset + name_len]).to_string();
-    offset += name_len;
-
-    // 2. 解析 symbol
-    let symbol_len =
-        u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap_or([0, 0, 0, 0])) as usize;
-    offset += 4;
-    let symbol = String::from_utf8_lossy(&data[offset..offset + symbol_len]).to_string();
-    offset += symbol_len;
-
-    // 3. 解析 uri
-    let uri_len =
-        u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap_or([0, 0, 0, 0])) as usize;
-    offset += 4;
-    let uri = String::from_utf8_lossy(&data[offset..offset + uri_len]).to_string();
-    offset += uri_len;
-    if offset + 32 > data.len() {
-        return Err(ClientError::InvalidData(format!(
-            "数据长度不足，无法读取creator: offset={}, data.len()={}",
-            offset,
-            data.len()
-        )));
-    }
-    // 4. 解析 creator (32字节公钥)
-    let creator = Pubkey::new_from_array(data[offset..offset + 32].try_into().unwrap());
-    let mint = accounts[instruction.accounts[0] as usize];
-    let user = accounts[instruction.accounts[7] as usize];
-    let bonding_curve = accounts[instruction.accounts[2] as usize];
+    let name = read_borsh_string(data, &mut offset, "name")?;
+    let symbol = read_borsh_string(data, &mut offset, "symbol")?;
+    let uri = read_borsh_string(data, &mut offset, "uri")?;
+    let creator_end = offset
+        .checked_add(32)
+        .ok_or_else(|| ClientError::InvalidData("creator offset overflow".to_string()))?;
+    let creator = Pubkey::new_from_array(
+        data.get(offset..creator_end)
+            .ok_or_else(|| ClientError::InvalidData("data too short for creator".to_string()))?
+            .try_into()
+            .map_err(|_| ClientError::InvalidData("invalid creator length".to_string()))?,
+    );
+    let mint = instruction_account(instruction, accounts, 0)?;
+    let user = instruction_account(instruction, accounts, 7)?;
+    let bonding_curve = instruction_account(instruction, accounts, 2)?;
     Ok(CreateTokenInfo {
         slot: 0,
-        name: name.to_string(),
-        symbol: symbol.to_string(),
-        uri: uri.to_string(),
+        name,
+        symbol,
+        uri,
         creator,
         mint,
         bonding_curve,
@@ -297,11 +257,13 @@ pub fn parse_instruction_bonk_create_token_data(
         return Err(ClientError::InvalidData("指令数据长度不足".to_string()));
     }
 
-    // 解析账户索引
     let accounts_data = &instruction.accounts;
-    // if accounts_data.len() < 18 {
-    //     return Err(ClientError::InvalidData("账户数量不足".to_string()));
-    // }
+    if accounts_data.len() <= 9 {
+        return Err(ClientError::InvalidData(format!(
+            "Bonk create instruction has {} accounts, need at least 10",
+            accounts_data.len()
+        )));
+    }
 
     let payer_index = accounts_data[0] as usize;
     let creator_index = accounts_data[1] as usize;
@@ -311,42 +273,18 @@ pub fn parse_instruction_bonk_create_token_data(
     let base_vault_index = accounts_data[8] as usize;
     let quote_vault_index = accounts_data[9] as usize;
 
-    // 安全地解析账户
-    let payer = if payer_index < accounts.len() {
-        accounts[payer_index].to_string()
-    } else {
-        String::new()
+    let account_string = |index: usize, field: &str| {
+        accounts.get(index).map(ToString::to_string).ok_or_else(|| {
+            ClientError::InvalidData(format!("{field} account index {index} is out of bounds"))
+        })
     };
-    let creator = if creator_index < accounts.len() {
-        accounts[creator_index].to_string()
-    } else {
-        String::new()
-    };
-    let platform_config = if platform_config_index < accounts.len() {
-        accounts[platform_config_index].to_string()
-    } else {
-        String::new()
-    };
-    let pool_state = if pool_state_index < accounts.len() {
-        accounts[pool_state_index].to_string()
-    } else {
-        String::new()
-    };
-    let base_mint = if base_mint_index < accounts.len() {
-        accounts[base_mint_index].to_string()
-    } else {
-        String::new()
-    };
-    let base_vault = if base_vault_index < accounts.len() {
-        accounts[base_vault_index].to_string()
-    } else {
-        String::new()
-    };
-    let quote_vault = if quote_vault_index < accounts.len() {
-        accounts[quote_vault_index].to_string()
-    } else {
-        String::new()
-    };
+    let payer = account_string(payer_index, "payer")?;
+    let creator = account_string(creator_index, "creator")?;
+    let platform_config = account_string(platform_config_index, "platform config")?;
+    let pool_state = account_string(pool_state_index, "pool state")?;
+    let base_mint = account_string(base_mint_index, "base mint")?;
+    let base_vault = account_string(base_vault_index, "base vault")?;
+    let quote_vault = account_string(quote_vault_index, "quote vault")?;
 
     // ========== 解析指令参数 ==========
     let mut offset = 8; // 跳过 discriminator
@@ -355,8 +293,6 @@ pub fn parse_instruction_bonk_create_token_data(
             "数据长度不足，无法解析参数".to_string(),
         ));
     }
-    println!("base_mint: {:?}", base_mint);
-
     // 解析 MintParams (symbol, name, uri)
     let (symbol, name, uri, new_offset) = parse_mint_params(&instruction.data[offset..])?;
     offset += new_offset;
@@ -370,8 +306,7 @@ pub fn parse_instruction_bonk_create_token_data(
             parse_curve_params(&instruction.data[offset..])?;
 
         match curve_type {
-            0 => {
-                // Constant
+            0 | 1 => {
                 if total_base_sell == 793100000000000 {
                     virtual_base = 1073025605596382.0;
                 } else {
@@ -382,30 +317,9 @@ pub fn parse_instruction_bonk_create_token_data(
                 } else {
                     virtual_quote = (total_quote_fund_raising as f64) * 0.35295121;
                 }
-                // println!("Constant曲线: TotalBaseSell={}", total_base_sell);
             }
-            1 => {
-                // Fixed
-                if total_base_sell == 793100000000000 {
-                    virtual_base = 1073025605596382.0;
-                } else {
-                    virtual_base = (total_base_sell as f64) * 1.352951211192;
-                }
-                if total_quote_fund_raising == 30000852951 {
-                    virtual_quote = 30000852951.0;
-                } else {
-                    virtual_quote = (total_quote_fund_raising as f64) * 0.35295121;
-                }
-
-                // println!("Fixed曲线: TotalBaseSell={}", total_base_sell);
-            }
-            2 => {
-                // Linear
-                println!("Linear曲线暂不支持");
-            }
-            _ => {
-                println!("未知曲线类型: {}", curve_type);
-            }
+            2 => {}
+            _ => {}
         }
     }
 
@@ -429,109 +343,17 @@ pub fn parse_instruction_bonk_create_token_data(
     })
 }
 
-// 修改 parse_mint_params 函数，添加调试信息
 fn parse_mint_params(data: &[u8]) -> ClientResult<(String, String, String, usize)> {
-    if data.is_empty() {
-        return Err(ClientError::InvalidData(
-            "MintParams数据长度不足".to_string(),
-        ));
-    }
-
-    let mut offset = 0;
-
-    // 添加调试信息
-    // println!("parse_mint_params: 总数据长度 {}", data.len());
-    // println!("parse_mint_params: 数据前32字节 {:?}", &data[0..data.len().min(32)]);
-
-    // 跳过 decimals (u8)
-    offset += 1;
-    // println!("跳过decimals后，offset = {}", offset);
-
-    // 解析 name (string) - 字符串长度是 u32
-    if offset + 3 >= data.len() {
-        return Err(ClientError::InvalidData(
-            "数据长度不足，无法解析 name 长度".to_string(),
-        ));
-    }
-    let name_len_bytes = [
-        data[offset],
-        data[offset + 1],
-        data[offset + 2],
-        data[offset + 3],
-    ];
-    let name_len = u32::from_le_bytes(name_len_bytes) as usize;
-    // println!("name长度字节: {:?}, 解析出的长度: {}", name_len_bytes, name_len);
-    offset += 4;
-
-    if offset + name_len > data.len() {
-        return Err(ClientError::InvalidData(format!(
-            "数据长度不足，无法解析 name, 需要 {} 字节，实际剩余 {} 字节",
-            name_len,
-            data.len() - offset
-        )));
-    }
-    let name = String::from_utf8_lossy(&data[offset..offset + name_len]).to_string();
-    // println!("解析到name: {}", name);
-    offset += name_len;
-
-    // 解析 symbol (string) - 字符串长度是 u32
-    if offset + 3 >= data.len() {
-        return Err(ClientError::InvalidData(
-            "数据长度不足，无法解析 symbol 长度".to_string(),
-        ));
-    }
-    let symbol_len_bytes = [
-        data[offset],
-        data[offset + 1],
-        data[offset + 2],
-        data[offset + 3],
-    ];
-    let symbol_len = u32::from_le_bytes(symbol_len_bytes) as usize;
-    // println!("symbol长度字节: {:?}, 解析出的长度: {}", symbol_len_bytes, symbol_len);
-    offset += 4;
-
-    if offset + symbol_len > data.len() {
-        return Err(ClientError::InvalidData(format!(
-            "数据长度不足，无法解析 symbol, 需要 {} 字节，实际剩余 {} 字节",
-            symbol_len,
-            data.len() - offset
-        )));
-    }
-    let symbol = String::from_utf8_lossy(&data[offset..offset + symbol_len]).to_string();
-    // println!("解析到symbol: {}", symbol);
-    offset += symbol_len;
-
-    // 解析 uri (string) - 字符串长度是 u32
-    if offset + 3 >= data.len() {
-        return Err(ClientError::InvalidData(
-            "数据长度不足，无法解析 uri 长度".to_string(),
-        ));
-    }
-    let uri_len_bytes = [
-        data[offset],
-        data[offset + 1],
-        data[offset + 2],
-        data[offset + 3],
-    ];
-    let uri_len = u32::from_le_bytes(uri_len_bytes) as usize;
-    // println!("uri长度字节: {:?}, 解析出的长度: {}", uri_len_bytes, uri_len);
-    offset += 4;
-
-    if offset + uri_len > data.len() {
-        return Err(ClientError::InvalidData(format!(
-            "数据长度不足，无法解析 uri, 需要 {} 字节，实际剩余 {} 字节",
-            uri_len,
-            data.len() - offset
-        )));
-    }
-    let uri = String::from_utf8_lossy(&data[offset..offset + uri_len]).to_string();
-    // println!("解析到uri: {}", uri);
-    offset += uri_len;
+    data.first()
+        .ok_or_else(|| ClientError::InvalidData("MintParams data is empty".to_string()))?;
+    let mut offset = 1;
+    let name = read_borsh_string(data, &mut offset, "name")?;
+    let symbol = read_borsh_string(data, &mut offset, "symbol")?;
+    let uri = read_borsh_string(data, &mut offset, "uri")?;
 
     Ok((symbol, name, uri, offset))
 }
 
-// 修改 parse_curve_params 函数
 fn parse_curve_params(data: &[u8]) -> ClientResult<(u8, u64, u64, usize)> {
     if data.is_empty() {
         return Err(ClientError::InvalidData(
@@ -540,85 +362,22 @@ fn parse_curve_params(data: &[u8]) -> ClientResult<(u8, u64, u64, usize)> {
     }
 
     let curve_type = data[0];
-    let mut offset = 1;
+    let parse_reserves = |curve_name: &str| {
+        let params = data.get(1..26).ok_or_else(|| {
+            ClientError::InvalidData(format!("data too short to parse {curve_name} curve"))
+        })?;
+        let total_base_sell = read_u64_le(params, 8, "curve base reserve")?;
+        let total_quote_fund_raising = read_u64_le(params, 16, "curve quote reserve")?;
+        Ok((total_base_sell, total_quote_fund_raising))
+    };
 
-    // 根据曲线类型解析数据
     match curve_type {
-        0 => {
-            // Constant - u64 + u64 + u64 + u8 = 25 bytes
-            if offset + 24 >= data.len() {
-                return Err(ClientError::InvalidData(
-                    "数据长度不足，无法解析 constant".to_string(),
-                ));
-            }
-            let total_base_sell = u64::from_le_bytes([
-                data[offset + 8],
-                data[offset + 9],
-                data[offset + 10],
-                data[offset + 11],
-                data[offset + 12],
-                data[offset + 13],
-                data[offset + 14],
-                data[offset + 15],
-            ]);
-            let total_quote_fund_raising = u64::from_le_bytes([
-                data[offset + 16],
-                data[offset + 17],
-                data[offset + 18],
-                data[offset + 19],
-                data[offset + 20],
-                data[offset + 21],
-                data[offset + 22],
-                data[offset + 23],
-            ]);
-            offset += 25;
-            Ok((
-                curve_type,
-                total_base_sell,
-                total_quote_fund_raising,
-                offset,
-            )) // 返回3个值
+        0 | 1 => {
+            let curve_name = if curve_type == 0 { "constant" } else { "fixed" };
+            let (total_base_sell, total_quote_fund_raising) = parse_reserves(curve_name)?;
+            Ok((curve_type, total_base_sell, total_quote_fund_raising, 26))
         }
-        1 => {
-            // Fixed - u64 + u64 + u8 = 17 bytes
-            if offset + 16 >= data.len() {
-                return Err(ClientError::InvalidData(
-                    "数据长度不足，无法解析 fixed".to_string(),
-                ));
-            }
-            let total_base_sell = u64::from_le_bytes([
-                data[offset + 8],
-                data[offset + 9],
-                data[offset + 10],
-                data[offset + 11],
-                data[offset + 12],
-                data[offset + 13],
-                data[offset + 14],
-                data[offset + 15],
-            ]);
-            let total_quote_fund_raising = u64::from_le_bytes([
-                data[offset + 16],
-                data[offset + 17],
-                data[offset + 18],
-                data[offset + 19],
-                data[offset + 20],
-                data[offset + 21],
-                data[offset + 22],
-                data[offset + 23],
-            ]);
-            offset += 25;
-            Ok((
-                curve_type,
-                total_base_sell,
-                total_quote_fund_raising,
-                offset,
-            )) // 返回3个值
-        }
-        2 => {
-            // Linear
-            println!("Linear曲线暂不支持");
-            Ok((curve_type, 0, 0, offset))
-        }
+        2 => Ok((curve_type, 0, 0, 1)),
         _ => Err(ClientError::InvalidData(format!(
             "未知的曲线类型: {}",
             curve_type
@@ -626,7 +385,6 @@ fn parse_curve_params(data: &[u8]) -> ClientResult<(u8, u64, u64, usize)> {
     }
 }
 
-// 在 logs_parser.rs 中添加解析函数
 pub fn parse_bonk_trade_data(
     instruction: &CompiledInstruction,
     accounts: &[Pubkey],
@@ -636,23 +394,10 @@ pub fn parse_bonk_trade_data(
         return Err(ClientError::InvalidData("数据长度不足".to_string()));
     }
 
-    let params = &instruction.data[8..];
-    let amount = u64::from_le_bytes(params[0..8].try_into().unwrap());
+    let amount = read_u64_le(&instruction.data, 8, "trade amount")?;
 
-    let payer_index = instruction.accounts[0] as usize;
-    let base_mint_index = instruction.accounts[9] as usize;
-
-    let payer = if payer_index < accounts.len() {
-        accounts[payer_index].to_string()
-    } else {
-        String::new()
-    };
-
-    let base_mint = if base_mint_index < accounts.len() {
-        accounts[base_mint_index].to_string()
-    } else {
-        String::new()
-    };
+    let payer = instruction_account(instruction, accounts, 0)?.to_string();
+    let base_mint = instruction_account(instruction, accounts, 9)?.to_string();
 
     Ok(TradeRequest {
         payer,
@@ -666,22 +411,18 @@ pub fn parse_instruction_trade_data(
     accounts: &[Pubkey],
     is_buy: bool,
 ) -> ClientResult<TradeInfo> {
-    let data = instruction.data.clone();
-    // 解析数据，如果长度不足则使用默认值
-    let amount = if data.len() >= 16 {
-        u64::from_le_bytes(data[8..16].try_into().unwrap())
-    } else {
-        0 // 默认值
-    };
+    let data = &instruction.data;
+    if data.len() < 24 {
+        return Err(ClientError::InvalidData(format!(
+            "trade instruction data too short: got {}, need at least 24",
+            data.len()
+        )));
+    }
+    let amount = read_u64_le(data, 8, "trade amount")?;
+    let max_sol_cost_or_min_sol_output = read_u64_le(data, 16, "trade quote amount")?;
 
-    let max_sol_cost_or_min_sol_output = if data.len() >= 24 {
-        u64::from_le_bytes(data[16..24].try_into().unwrap())
-    } else {
-        0 // 默认值
-    };
-
-    let user = accounts[instruction.accounts[6] as usize];
-    let mint = accounts[instruction.accounts[2] as usize];
+    let user = instruction_account(instruction, accounts, 6)?;
+    let mint = instruction_account(instruction, accounts, 2)?;
 
     Ok(TradeInfo {
         slot: 0,
@@ -696,4 +437,77 @@ pub fn parse_instruction_trade_data(
         real_sol_reserves: 0,
         real_token_reserves: 0,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn push_borsh_string(buffer: &mut Vec<u8>, value: &str) {
+        buffer.extend_from_slice(&(value.len() as u32).to_le_bytes());
+        buffer.extend_from_slice(value.as_bytes());
+    }
+
+    #[test]
+    fn short_trade_log_data_returns_error() {
+        let encoded = BASE64.encode([0u8; 32]);
+        assert!(parse_trade_data(&encoded).is_err());
+    }
+
+    #[test]
+    fn truncated_create_strings_return_error() {
+        let mut data = vec![0u8; 8];
+        push_borsh_string(&mut data, "name");
+        data.extend_from_slice(&10u32.to_le_bytes());
+        data.extend_from_slice(b"x");
+
+        let instruction = CompiledInstruction {
+            program_id_index: 0,
+            accounts: vec![],
+            data,
+        };
+        assert!(parse_instruction_create_token_data(&instruction, &[]).is_err());
+    }
+
+    #[test]
+    fn create_instruction_rejects_missing_accounts() {
+        let mut data = vec![0u8; 8];
+        push_borsh_string(&mut data, "name");
+        push_borsh_string(&mut data, "SYM");
+        push_borsh_string(&mut data, "https://example.invalid");
+        data.extend_from_slice(Pubkey::new_unique().as_ref());
+
+        let instruction = CompiledInstruction {
+            program_id_index: 0,
+            accounts: vec![],
+            data,
+        };
+        assert!(parse_instruction_create_token_data(&instruction, &[]).is_err());
+    }
+
+    #[test]
+    fn fixed_curve_rejects_truncated_reserves() {
+        assert!(parse_curve_params(&[1u8; 25]).is_err());
+    }
+
+    #[test]
+    fn fixed_curve_reads_reserves_at_protocol_offsets() {
+        let mut data = [0u8; 26];
+        data[0] = 1;
+        data[9..17].copy_from_slice(&123u64.to_le_bytes());
+        data[17..25].copy_from_slice(&456u64.to_le_bytes());
+
+        let parsed = parse_curve_params(&data).expect("valid fixed curve");
+        assert_eq!(parsed, (1, 123, 456, 26));
+    }
+
+    #[test]
+    fn bonk_trade_rejects_short_account_list() {
+        let instruction = CompiledInstruction {
+            program_id_index: 0,
+            accounts: vec![],
+            data: vec![0u8; 32],
+        };
+        assert!(parse_bonk_trade_data(&instruction, &[], TradeType::BuyExactIn).is_err());
+    }
 }

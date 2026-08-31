@@ -2,11 +2,34 @@ syntax = "proto3";
 
 package shredstream;
 import "google/protobuf/timestamp.proto";
+import "shared.proto";
 
+service Shredstream {
+  rpc SendHeartbeat(Heartbeat) returns (HeartbeatResponse);
+}
+
+service ShredstreamProxy {
+  rpc SubscribeEntries(SubscribeEntriesRequest) returns (stream Entry);
+}
 
 service ShrederService {
   rpc SubscribeEntries(SubscribeEntriesRequest) returns (stream Entry);
   rpc SubscribeTransactions(stream SubscribeTransactionsRequest) returns (stream SubscribeTransactionsResponse);
+}
+
+message Heartbeat {
+  shared.Socket socket = 1;
+  repeated string regions = 2;
+}
+
+message HeartbeatResponse {
+  uint32 ttl_ms = 1;
+}
+
+message TraceShred {
+  string region = 1;
+  google.protobuf.Timestamp created_at = 2;
+  uint32 seq_num = 3;
 }
 
 message SubscribeEntriesRequest {

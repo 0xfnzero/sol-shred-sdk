@@ -245,31 +245,15 @@ fn detect_pumpfun_create_mints(
 ) -> (PumpMintSet, PumpMintSet) {
     let mut created_mints = PumpMintSet::new();
     let mut mayhem_mints = PumpMintSet::new();
-    match message {
-        VersionedMessage::Legacy(msg) => {
-            for ix in &msg.instructions {
-                scan_create_mint_from_ix(
-                    ix.program_id_index,
-                    &ix.accounts,
-                    &ix.data,
-                    static_keys,
-                    &mut created_mints,
-                    &mut mayhem_mints,
-                );
-            }
-        }
-        VersionedMessage::V0(msg) => {
-            for ix in &msg.instructions {
-                scan_create_mint_from_ix(
-                    ix.program_id_index,
-                    &ix.accounts,
-                    &ix.data,
-                    static_keys,
-                    &mut created_mints,
-                    &mut mayhem_mints,
-                );
-            }
-        }
+    for ix in message.instructions() {
+        scan_create_mint_from_ix(
+            ix.program_id_index,
+            &ix.accounts,
+            &ix.data,
+            static_keys,
+            &mut created_mints,
+            &mut mayhem_mints,
+        );
     }
     (created_mints, mayhem_mints)
 }
@@ -546,43 +530,21 @@ fn parse_transaction_pump_events_with_filter(
     } else {
         (PumpMintSet::new(), PumpMintSet::new())
     };
-    match &transaction.message {
-        VersionedMessage::Legacy(msg) => {
-            for ix in &msg.instructions {
-                dispatch_shred_outer(
-                    ix.program_id_index,
-                    &ix.accounts,
-                    &ix.data,
-                    static_keys,
-                    signature,
-                    slot,
-                    tx_index,
-                    recv_us,
-                    filter,
-                    &created_mints,
-                    &mayhem_mints,
-                    events,
-                );
-            }
-        }
-        VersionedMessage::V0(msg) => {
-            for ix in &msg.instructions {
-                dispatch_shred_outer(
-                    ix.program_id_index,
-                    &ix.accounts,
-                    &ix.data,
-                    static_keys,
-                    signature,
-                    slot,
-                    tx_index,
-                    recv_us,
-                    filter,
-                    &created_mints,
-                    &mayhem_mints,
-                    events,
-                );
-            }
-        }
+    for ix in transaction.message.instructions() {
+        dispatch_shred_outer(
+            ix.program_id_index,
+            &ix.accounts,
+            &ix.data,
+            static_keys,
+            signature,
+            slot,
+            tx_index,
+            recv_us,
+            filter,
+            &created_mints,
+            &mayhem_mints,
+            events,
+        );
     }
 }
 

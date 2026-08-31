@@ -806,6 +806,7 @@ mod tests {
                 ],
                 versioned: false,
                 address_table_lookups: Vec::new(),
+                config: None,
             }),
         });
         let meta = TransactionStatusMeta::default();
@@ -932,6 +933,7 @@ mod tests {
                 ],
                 versioned: false,
                 address_table_lookups: Vec::new(),
+                config: None,
             }),
         });
         let meta = TransactionStatusMeta::default();

@@ -3,7 +3,6 @@ use crate::common::logs_data::{
 };
 use base64::engine::general_purpose;
 use base64::Engine;
-use regex::Regex;
 
 pub const PROGRAM_DATA: &str = "Program data: ";
 
@@ -47,57 +46,95 @@ impl PumpfunEvent {
         let mut create_info: Option<CreateTokenInfo> = None;
         let mut trade_info: Option<TradeInfo> = None;
 
-        if !logs.is_empty() {
-            let logs_iter = logs.iter().peekable();
+        for log in logs.iter().rev() {
+            let Some(encoded) = log.strip_prefix(PROGRAM_DATA) else {
+                continue;
+            };
+            let Ok(bytes) = general_purpose::STANDARD.decode(encoded) else {
+                continue;
+            };
+            let Some(payload) = bytes.get(8..) else {
+                continue;
+            };
 
-            for l in logs_iter.rev() {
-                if let Some(log) = l.strip_prefix(PROGRAM_DATA) {
-                    let borsh_bytes = general_purpose::STANDARD.decode(log).unwrap();
-                    let slice: &[u8] = &borsh_bytes[8..];
-
-                    if create_info.is_none() {
-                        if let Ok(e) = CreateTokenInfo::from_bytes(slice) {
-                            create_info = Some(e);
-                            continue;
-                        }
-                    }
-
-                    if trade_info.is_none() {
-                        if let Ok(e) = TradeInfo::from_bytes(slice) {
-                            trade_info = Some(e);
-                        }
-                    }
+            if create_info.is_none() {
+                if let Ok(event) = CreateTokenInfo::from_bytes(payload) {
+                    create_info = Some(event);
+                    continue;
                 }
+            }
+
+            if trade_info.is_none() {
+                if let Ok(event) = TradeInfo::from_bytes(payload) {
+                    trade_info = Some(event);
+                }
+            }
+            if create_info.is_some() && trade_info.is_some() {
+                break;
             }
         }
         (create_info, trade_info)
     }
 }
 
+const RAY_LOG_PREFIX: &str = "ray_log: ";
+
+#[inline]
+fn ray_log_payload(log: &str) -> Option<&str> {
+    let encoded = log.split_once(RAY_LOG_PREFIX)?.1;
+    let end = encoded
+        .find(|character: char| {
+            !character.is_ascii_alphanumeric() && !matches!(character, '+' | '/' | '=')
+        })
+        .unwrap_or(encoded.len());
+    (end > 0).then_some(&encoded[..end])
+}
 #[derive(Debug, Clone, Copy)]
 pub struct RaydiumEvent {}
 
 impl RaydiumEvent {
-    pub fn parse_logs<T: EventTrait + Clone>(logs: &[String]) -> Option<T> {
-        let mut event: Option<T> = None;
+    pub fn parse_logs<T: EventTrait>(logs: &[String]) -> Option<T> {
+        logs.iter().rev().find_map(|log| {
+            let encoded = ray_log_payload(log)?;
+            let bytes = general_purpose::STANDARD.decode(encoded).ok()?;
+            T::from_bytes(&bytes).ok()
+        })
+    }
+}
 
-        if !logs.is_empty() {
-            let logs_iter = logs.iter().peekable();
-            let re = Regex::new(r"ray_log: (?P<base64>[A-Za-z0-9+/=]+)").unwrap();
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::common::error::ClientResult;
 
-            for l in logs_iter.rev() {
-                if let Some(caps) = re.captures(l) {
-                    if let Some(base64) = caps.name("base64") {
-                        let bytes = general_purpose::STANDARD.decode(base64.as_str()).unwrap();
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    struct RawEvent(Vec<u8>);
 
-                        if let Ok(e) = T::from_bytes(&bytes) {
-                            event = Some(e);
-                        }
-                    }
-                }
-            }
+    impl EventTrait for RawEvent {
+        fn from_bytes(bytes: &[u8]) -> ClientResult<Self> {
+            Ok(Self(bytes.to_vec()))
         }
+    }
 
-        event
+    #[test]
+    fn raydium_parser_returns_latest_valid_log_without_regex() {
+        let logs = vec![
+            "Program log: ray_log: AQ== trailing".to_owned(),
+            "Program log: ray_log: Ag==".to_owned(),
+        ];
+
+        assert_eq!(RaydiumEvent::parse_logs(&logs), Some(RawEvent(vec![2])));
+    }
+
+    #[test]
+    fn malformed_encoded_logs_are_ignored() {
+        let raydium_logs = vec!["Program log: ray_log: ===".to_owned()];
+        assert_eq!(RaydiumEvent::parse_logs::<RawEvent>(&raydium_logs), None);
+
+        let pump_logs = vec![
+            format!("{PROGRAM_DATA}not-base64"),
+            format!("{PROGRAM_DATA}AQIDBA=="),
+        ];
+        assert_eq!(PumpfunEvent::parse_logs(&pump_logs), (None, None));
     }
 }
