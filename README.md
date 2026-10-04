@@ -108,9 +108,23 @@ PumpSwap Pool accounts and Buy/Sell events expose the appended signed
 effective_quote_reserves = pool_quote_token_account.amount + virtual_quote_reserves
 ```
 
-Legacy Pool accounts remain supported and decode this field as `0`. Use checked
-signed arithmetic when combining the raw token-account balance (`u64`) with the
-virtual reserve (`i128`). The base reserve remains the raw base-vault balance.
+`virtual_quote_reserves` may be negative (official rollout: September 30).
+Preserve its sign in decoding, JSON consumers and indexer storage. Both buys and
+sells use the effective quote reserve; the base reserve remains the raw base-vault
+balance. Legacy Pool accounts decode the missing field as `0`.
+
+```rust
+use sol_shred_sdk::accounts::pumpswap::effective_quote_reserves;
+
+// Raw quote-vault balance 1,000 plus a signed adjustment of -500.
+let quote_reserve = effective_quote_reserves(1_000, -500).expect("valid pool state");
+assert_eq!(quote_reserve, 500);
+// Pass quote_reserve to both buy and sell quote math.
+```
+
+The helper adds in `i128` before converting to `u64`. PumpSwap guarantees the
+effective reserve fits in `u64`; the helper additionally returns `None` for invalid
+or inconsistent inputs. See the [official negative reserve update](https://github.com/pump-fun/pump-public-docs/blob/main/docs/NEGATIVE_VIRTUAL_QUOTE_RESERVES.md).
 
 ## Decode Mode
 

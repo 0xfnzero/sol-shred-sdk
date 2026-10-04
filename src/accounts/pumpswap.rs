@@ -37,6 +37,24 @@ pub const GLOBAL_CONFIG_SIZE: usize = 32 + 8 + 8 + 1 + 32 * 8 + 8 + 32;
 pub const POOL_LEGACY_SIZE: usize = 244;
 pub const POOL_SIZE: usize = 253;
 
+/// Combine a raw quote-vault balance with the signed virtual quote reserves.
+/// Use this effective reserve for both buy and sell pricing; base reserves stay
+/// equal to the raw base-vault balance. Negative virtual reserves reduce the result.
+///
+/// PumpSwap guarantees valid on-chain state produces a non-negative `u64`.
+/// Returns `None` for inconsistent snapshots or invalid input instead of wrapping,
+/// clamping a negative virtual reserve to zero, or losing its sign.
+/// See <https://github.com/pump-fun/pump-public-docs/blob/main/docs/NEGATIVE_VIRTUAL_QUOTE_RESERVES.md>.
+#[inline]
+pub fn effective_quote_reserves(
+    pool_quote_token_account_amount: u64,
+    virtual_quote_reserves: i128,
+) -> Option<u64> {
+    let effective =
+        i128::from(pool_quote_token_account_amount).checked_add(virtual_quote_reserves)?;
+    u64::try_from(effective).ok()
+}
+
 /// 解析 PumpSwap Global Config 账户
 ///
 /// # Arguments

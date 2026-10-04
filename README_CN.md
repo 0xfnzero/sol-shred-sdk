@@ -104,7 +104,18 @@ PumpSwap Pool account 和 Buy/Sell 事件会暴露追加的带符号 `virtual_qu
 effective_quote_reserves = pool_quote_token_account.amount + virtual_quote_reserves
 ```
 
-旧版 Pool account 仍然受支持，该字段会解析为 `0`。将原始 token account 余额（`u64`）和虚拟储备（`i128`）组合时应使用 checked signed arithmetic。Base reserve 仍然使用原始 base vault 余额。
+`virtual_quote_reserves` 可以为负值（官方文档标注 9 月 30 日启用）。解析、JSON 消费和索引存储均须保留符号，不能转为无符号整数或将负值截为零。买入和卖出都使用有效 quote 储备，Base reserve 仍使用原始 base vault 余额。旧版 Pool account 缺失该字段时解析为 `0`。
+
+```rust
+use sol_shred_sdk::accounts::pumpswap::effective_quote_reserves;
+
+// 原始 quote vault 余额 1,000，加上带符号的虚拟储备 -500。
+let quote_reserve = effective_quote_reserves(1_000, -500).expect("valid pool state");
+assert_eq!(quote_reserve, 500);
+// 买入和卖出报价均使用 quote_reserve。
+```
+
+该工具先在 `i128` 中相加，再转换为 `u64`。链上程序保证有效储备非负且不超过 `u64`；工具对无效或不一致的输入额外返回 `None`。详见[官方负虚拟储备更新说明](https://github.com/pump-fun/pump-public-docs/blob/main/docs/NEGATIVE_VIRTUAL_QUOTE_RESERVES.md)。
 
 ## 解码模式
 

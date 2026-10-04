@@ -689,7 +689,8 @@ pub struct PumpSwapBuyEvent {
     /// Buyback fee amount.
     #[serde(default)]
     pub buyback_fee: u64,
-    /// Appended quote reserves used for effective-reserve pricing.
+    /// Signed quote adjustment, possibly negative. Add to the raw quote-vault
+    /// reserve in i128 for both buy and sell pricing.
     #[serde(default)]
     pub virtual_quote_reserves: i128,
     /// Whether this pool is eligible for boost.
@@ -766,7 +767,8 @@ pub struct PumpSwapSellEvent {
     /// Buyback fee amount.
     #[serde(default)]
     pub buyback_fee: u64,
-    /// Appended quote reserves used for effective-reserve pricing.
+    /// Signed quote adjustment, possibly negative. Add to the raw quote-vault
+    /// reserve in i128 for both buy and sell pricing.
     #[serde(default)]
     pub virtual_quote_reserves: i128,
     /// Whether this pool is eligible for boost.
@@ -1749,7 +1751,8 @@ pub struct PumpSwapPool {
     pub coin_creator: Pubkey,
     pub is_mayhem_mode: bool,
     pub is_cashback_coin: bool,
-    /// Added by the PumpSwap boost upgrade. Legacy pools decode this as zero.
+    /// Signed quote adjustment, possibly negative. Legacy pools decode this as
+    /// zero. Add to the raw quote-vault balance in i128 for buy and sell pricing.
     #[serde(default)]
     pub virtual_quote_reserves: i128,
 }
