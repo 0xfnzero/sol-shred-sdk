@@ -34,24 +34,42 @@ pub const GLOBAL_CONFIG_SIZE: usize = 32 + 8 + 8 + 1 + 32 * 8 + 8 + 32;
 /// - 1   byte  is_mayhem_mode
 /// - 1   byte  is_cashback_coin
 /// - 16  bytes virtual_quote_reserves (current layout only)
+/// - 8   bytes creator_fee_bps
+/// - 1   byte  can_edit_creator_fee
+/// - 1   byte  is_holder_reward
 pub const POOL_LEGACY_SIZE: usize = 244;
-pub const POOL_SIZE: usize = 253;
+pub const POOL_BOOST_SIZE: usize = 253;
+pub const POOL_CREATOR_FEE_SIZE: usize = 262;
+pub const POOL_SIZE: usize = 263;
+
+#[inline]
+fn decode_borsh_bool(value: u8) -> Option<bool> {
+    match value {
+        0 => Some(false),
+        1 => Some(true),
+        _ => None,
+    }
+}
 
 /// Combine a raw quote-vault balance with the signed virtual quote reserves.
 /// Use this effective reserve for both buy and sell pricing; base reserves stay
 /// equal to the raw base-vault balance. Negative virtual reserves reduce the result.
 ///
 /// PumpSwap guarantees valid on-chain state produces a non-negative `u64`.
-/// Returns `None` for inconsistent snapshots or invalid input instead of wrapping,
-/// clamping a negative virtual reserve to zero, or losing its sign.
+/// Returns `None` if the sum is negative or exceeds `u64::MAX`; never clamps a
+/// negative virtual reserve to zero or loses its sign. The caller must provide
+/// a coherent Pool/vault snapshot: a valid sum alone cannot establish consistency.
 /// See <https://github.com/pump-fun/pump-public-docs/blob/main/docs/NEGATIVE_VIRTUAL_QUOTE_RESERVES.md>.
 #[inline]
 pub fn effective_quote_reserves(
     pool_quote_token_account_amount: u64,
     virtual_quote_reserves: i128,
 ) -> Option<u64> {
+    // The non-negative addend is at most u64::MAX. Any i128 overflow therefore
+    // wraps to a negative value, which try_from rejects. One range check covers
+    // both overflow and out-of-u64 results without a separate overflow check.
     let effective =
-        i128::from(pool_quote_token_account_amount).checked_add(virtual_quote_reserves)?;
+        i128::from(pool_quote_token_account_amount).wrapping_add(virtual_quote_reserves);
     u64::try_from(effective).ok()
 }
 
@@ -109,7 +127,7 @@ pub fn parse_global_config(account: &AccountData, metadata: EventMetadata) -> Op
     let reserved_fee_recipient = read_pubkey(data, offset)?;
     offset += 32;
 
-    let mayhem_mode_enabled = read_u8(data, offset)? != 0;
+    let mayhem_mode_enabled = decode_borsh_bool(read_u8(data, offset)?)?;
     offset += 1;
 
     // 读取 7 个 reserved_fee_recipients
@@ -118,6 +136,23 @@ pub fn parse_global_config(account: &AccountData, metadata: EventMetadata) -> Op
         *reserved_fee_recipient = read_pubkey(data, offset)?;
         offset += 32;
     }
+
+    let is_cashback_enabled = decode_borsh_bool(read_u8(data, offset).unwrap_or_default())?;
+    offset += 1;
+    let mut buyback_fee_recipients = [solana_sdk::pubkey::Pubkey::default(); 8];
+    for (index, recipient) in buyback_fee_recipients.iter_mut().enumerate() {
+        *recipient = read_pubkey(data, offset + index * 32).unwrap_or_default();
+    }
+    offset += 32 * 8;
+    let buyback_basis_points = read_u64_le(data, offset).unwrap_or_default();
+    offset += 8;
+    let boost_authority = read_pubkey(data, offset).unwrap_or_default();
+    offset += 32;
+    let boost_enabled = decode_borsh_bool(read_u8(data, offset).unwrap_or_default())?;
+    offset += 1;
+    let creator_fee_configurable = decode_borsh_bool(read_u8(data, offset).unwrap_or_default())?;
+    offset += 1;
+    let max_configurable_creator_fee_bps = read_u64_le(data, offset).unwrap_or_default();
 
     let global_config = PumpSwapGlobalConfig {
         admin,
@@ -131,6 +166,13 @@ pub fn parse_global_config(account: &AccountData, metadata: EventMetadata) -> Op
         reserved_fee_recipient,
         mayhem_mode_enabled,
         reserved_fee_recipients,
+        is_cashback_enabled,
+        buyback_fee_recipients,
+        buyback_basis_points,
+        boost_authority,
+        boost_enabled,
+        creator_fee_configurable,
+        max_configurable_creator_fee_bps,
     };
 
     Some(DexEvent::PumpSwapGlobalConfigAccount(
@@ -159,7 +201,12 @@ pub fn parse_pool(account: &AccountData, metadata: EventMetadata) -> Option<DexE
     if account.data.len() < POOL_LEGACY_SIZE + 8 {
         return None;
     }
-    if account.data.len() != POOL_LEGACY_SIZE + 8 && account.data.len() < POOL_SIZE + 8 {
+    let body_len = account.data.len() - 8;
+    if body_len != POOL_LEGACY_SIZE
+        && body_len != POOL_BOOST_SIZE
+        && body_len != POOL_CREATOR_FEE_SIZE
+        && body_len < POOL_SIZE
+    {
         return None;
     }
 
@@ -202,16 +249,23 @@ pub fn parse_pool(account: &AccountData, metadata: EventMetadata) -> Option<DexE
     let coin_creator = read_pubkey(data, offset)?;
     offset += 32;
 
-    let is_mayhem_mode = read_u8(data, offset)? != 0;
+    let is_mayhem_mode = decode_borsh_bool(read_u8(data, offset)?)?;
     offset += 1;
 
-    let is_cashback_coin = read_u8(data, offset)? != 0;
+    let is_cashback_coin = decode_borsh_bool(read_u8(data, offset)?)?;
     offset += 1;
 
     let virtual_quote_reserves = data
         .get(offset..offset + 16)
         .map(|bytes| i128::from_le_bytes(bytes.try_into().expect("checked i128 slice")))
         .unwrap_or_default();
+    offset += 16;
+
+    let creator_fee_bps = read_u64_le(data, offset).unwrap_or_default();
+    offset += 8;
+    let can_edit_creator_fee = decode_borsh_bool(read_u8(data, offset).unwrap_or_default())?;
+    offset += 1;
+    let is_holder_reward = decode_borsh_bool(read_u8(data, offset).unwrap_or_default())?;
 
     let pool = PumpSwapPool {
         pool_bump,
@@ -227,6 +281,9 @@ pub fn parse_pool(account: &AccountData, metadata: EventMetadata) -> Option<DexE
         is_mayhem_mode,
         is_cashback_coin,
         virtual_quote_reserves,
+        creator_fee_bps,
+        can_edit_creator_fee,
+        is_holder_reward,
     };
 
     Some(DexEvent::PumpSwapPoolAccount(PumpSwapPoolAccountEvent {
@@ -297,7 +354,7 @@ mod tests {
 
     #[test]
     fn parse_current_261_byte_pool_reads_virtual_reserves() {
-        let account = pool_account(Some(-987_654_321), 8 + POOL_SIZE);
+        let account = pool_account(Some(-987_654_321), 8 + POOL_BOOST_SIZE);
         let pool = parsed_pool(&account);
 
         assert_eq!(account.data.len(), 261);
@@ -308,6 +365,36 @@ mod tests {
         assert!(pool.is_mayhem_mode);
         assert!(pool.is_cashback_coin);
         assert_eq!(pool.virtual_quote_reserves, -987_654_321);
+        assert_eq!(pool.creator_fee_bps, 0);
+        assert!(!pool.can_edit_creator_fee);
+        assert!(!pool.is_holder_reward);
+    }
+
+    #[test]
+    fn parse_current_271_byte_pool_reads_creator_fee_fields() {
+        let mut account = pool_account(Some(-987_654_321), 8 + POOL_SIZE);
+        account.data[261..269].copy_from_slice(&250u64.to_le_bytes());
+        account.data[269] = 1;
+        account.data[270] = 1;
+        let pool = parsed_pool(&account);
+
+        assert_eq!(account.data.len(), 271);
+        assert_eq!(pool.virtual_quote_reserves, -987_654_321);
+        assert_eq!(pool.creator_fee_bps, 250);
+        assert!(pool.can_edit_creator_fee);
+        assert!(pool.is_holder_reward);
+    }
+
+    #[test]
+    fn parse_creator_fee_270_byte_pool_defaults_holder_reward() {
+        let mut account = pool_account(Some(-987_654_321), 8 + POOL_CREATOR_FEE_SIZE);
+        account.data[261..269].copy_from_slice(&250u64.to_le_bytes());
+        account.data[269] = 1;
+        let pool = parsed_pool(&account);
+
+        assert_eq!(pool.creator_fee_bps, 250);
+        assert!(pool.can_edit_creator_fee);
+        assert!(!pool.is_holder_reward);
     }
 
     #[test]
@@ -329,8 +416,8 @@ mod tests {
 
     #[test]
     fn parse_pool_rejects_partial_current_layout() {
-        for allocated_len in 253..261 {
-            let account = pool_account(Some(987_654_321), allocated_len);
+        for body_len in (245..253).chain(254..262) {
+            let account = pool_account(Some(987_654_321), 8 + body_len);
             assert!(parse_pool(&account, EventMetadata::default()).is_none());
         }
     }

@@ -85,7 +85,7 @@ git clone https://github.com/0xfnzero/sol-shred-sdk
 
 ```toml
 # 添加到您的 Cargo.toml
-sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.0" }
+sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.1" }
 ```
 
 ### 使用 crates.io
@@ -93,7 +93,7 @@ sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.0" }
 ```toml
 # 添加到您的 Cargo.toml
 [dependencies]
-sol-shred-sdk = "4.0.0"
+sol-shred-sdk = "4.0.1"
 ```
 
 ## PumpSwap 有效 Quote Reserves
@@ -115,7 +115,11 @@ assert_eq!(quote_reserve, 500);
 // 买入和卖出报价均使用 quote_reserve。
 ```
 
-该工具先在 `i128` 中相加，再转换为 `u64`。链上程序保证有效储备非负且不超过 `u64`；工具对无效或不一致的输入额外返回 `None`。详见[官方负虚拟储备更新说明](https://github.com/pump-fun/pump-public-docs/blob/main/docs/NEGATIVE_VIRTUAL_QUOTE_RESERVES.md)。
+该工具先在 `i128` 中相加，再转换为 `u64`。链上程序保证有效储备非负且不超过 `u64`；工具在相加结果为负或超过 `u64::MAX` 时返回 `None`。有效数值不能证明 Pool/vault 快照一致，快照一致性需由账户缓存维护。详见[官方负虚拟储备更新说明](https://github.com/pump-fun/pump-public-docs/blob/main/docs/NEGATIVE_VIRTUAL_QUOTE_RESERVES.md)。
+
+原始 shreds 只包含外层交易指令，不包含执行日志、内部 CPI、Pool 状态或 vault 余额。因此外层 Buy/Sell 解析事件的储备及费率默认 `0` 表示未知，不能视为池的真实值。报价需要预先维护一致的 Pool/vault/手续费配置缓存；不要在交易热路径临时查询 RPC。`buy_exact_quote_in` 的 `min_base_amount_out` 是指令参数下限，不是实际成交量。外层买入解析已保留 `track_volume` 和 `ix_name`，并同步当前追加账户位置。
+
+真实 RPC 示例及验证边界见 [PumpSwap RPC 文档](examples/PUMPSWAP_RPC.md)。
 
 ## 解码模式
 

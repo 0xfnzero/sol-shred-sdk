@@ -46,17 +46,28 @@ pub mod discriminators {
 /// Base64 查找器预计算 (用于快速定位)
 static BASE64_FINDER: Lazy<memmem::Finder> = Lazy::new(|| memmem::Finder::new(b"Program data: "));
 
+/// Standard runtime logs put the marker at byte zero. Borrow that suffix without
+/// initializing/accessing the finder; keep searching for prefixed compatibility logs.
+#[inline(always)]
+fn program_data_body(log: &str) -> Option<&str> {
+    if let Some(body) = log.strip_prefix("Program data: ") {
+        return Some(body);
+    }
+    let pos = BASE64_FINDER.find(log.as_bytes())?;
+    Some(&log[pos + 14..])
+}
+
 /// 跳过 ASCII 空白后拷贝 base64 前缀（Explorer / 部分日志会在 base64 中插空格）
 #[inline(always)]
 fn copy_b64_skip_ws_prefix(src: &[u8], out: &mut [u8], max_copy: usize) -> Option<usize> {
     let cap = max_copy.min(out.len());
     let mut j = 0usize;
     for &b in src {
-        if b.is_ascii_whitespace() {
-            continue;
-        }
         if j >= cap {
             break;
+        }
+        if b.is_ascii_whitespace() {
+            continue;
         }
         out[j] = b;
         j += 1;
@@ -77,10 +88,7 @@ fn copy_b64_skip_ws_prefix(src: &[u8], out: &mut [u8], max_copy: usize) -> Optio
 /// 缓冲区大小增加到 2KB 以防止 base64-simd 缓冲区溢出panic
 #[inline(always)]
 fn extract_program_data_zero_copy<'a>(log: &'a str, buf: &'a mut [u8; 2048]) -> Option<&'a [u8]> {
-    let log_bytes = log.as_bytes();
-    let pos = BASE64_FINDER.find(log_bytes)?;
-
-    let data_part = &log[pos + 14..];
+    let data_part = program_data_body(log)?;
     let trimmed = data_part.trim();
     let body = trimmed.as_bytes();
 
@@ -108,24 +116,17 @@ fn extract_program_data_zero_copy<'a>(log: &'a str, buf: &'a mut [u8; 2048]) -> 
 /// 快速 discriminator 提取 (SIMD 优化)
 #[inline(always)]
 fn extract_discriminator_simd(log: &str) -> Option<u64> {
-    let log_bytes = log.as_bytes();
-    let pos = BASE64_FINDER.find(log_bytes)?;
-
-    let data_part = &log[pos + 14..];
+    let data_part = program_data_body(log)?;
     let body = data_part.trim().as_bytes();
 
     use base64_simd::AsOut;
     let mut compact = [0u8; 24];
     let n = copy_b64_skip_ws_prefix(body, &mut compact, 16)?;
     let mut dec = [0u8; 12];
-    base64_simd::STANDARD
+    let decoded = base64_simd::STANDARD
         .decode(&compact[..n], dec.as_mut().as_out())
         .ok()?;
-
-    unsafe {
-        let ptr = dec.as_ptr() as *const u64;
-        Some(ptr.read_unaligned())
-    }
+    Some(u64::from_le_bytes(decoded.get(..8)?.try_into().ok()?))
 }
 
 // ============================================================================
@@ -155,6 +156,8 @@ struct PumpSwapTradeTail {
     virtual_quote_reserves: i128,
     can_boost: bool,
     base_supply: u64,
+    holder_rewards_bps: u64,
+    holder_rewards: u64,
 }
 
 #[inline(always)]
@@ -170,13 +173,11 @@ fn read_i128_le_at(data: &[u8], offset: usize) -> Option<i128> {
 }
 
 #[inline(always)]
-fn read_borsh_string(data: &[u8], offset: usize) -> Option<(String, usize)> {
+fn read_borsh_string(data: &[u8], offset: usize) -> Option<(&str, usize)> {
     let content_offset = offset.checked_add(4)?;
     let len = u32::from_le_bytes(data.get(offset..content_offset)?.try_into().ok()?) as usize;
     let end = content_offset.checked_add(len)?;
-    let value = std::str::from_utf8(data.get(content_offset..end)?)
-        .ok()?
-        .to_owned();
+    let value = std::str::from_utf8(data.get(content_offset..end)?).ok()?;
     Some((value, end))
 }
 
@@ -186,6 +187,7 @@ fn parse_trade_tail(data: &[u8]) -> Option<PumpSwapTradeTail> {
     const CASHBACK_LEN: usize = 16;
     const BUYBACK_LEN: usize = 32;
     const BOOST_LEN: usize = 57;
+    const HOLDER_REWARDS_LEN: usize = 73;
 
     if data.is_empty() {
         return Some(PumpSwapTradeTail::default());
@@ -222,6 +224,13 @@ fn parse_trade_tail(data: &[u8]) -> Option<PumpSwapTradeTail> {
         _ => return None,
     };
     tail.base_supply = read_u64_le_at(data, 49)?;
+    if data.len() != BOOST_LEN && data.len() < HOLDER_REWARDS_LEN {
+        return None;
+    }
+    if data.len() >= HOLDER_REWARDS_LEN {
+        tail.holder_rewards_bps = read_u64_le_at(data, 57)?;
+        tail.holder_rewards = read_u64_le_at(data, 65)?;
+    }
     Some(tail)
 }
 
@@ -238,10 +247,13 @@ unsafe fn read_u8_unchecked(data: &[u8], offset: usize) -> u8 {
     *data.get_unchecked(offset)
 }
 
-/// 读取 bool (unsafe, 无边界检查)
 #[inline(always)]
-unsafe fn read_bool_unchecked(data: &[u8], offset: usize) -> bool {
-    *data.get_unchecked(offset) == 1
+fn read_borsh_bool_at(data: &[u8], offset: usize) -> Option<bool> {
+    match *data.get(offset)? {
+        0 => Some(false),
+        1 => Some(true),
+        _ => None,
+    }
 }
 
 /// 读取 Pubkey (unsafe, 无边界检查)
@@ -366,76 +378,17 @@ fn parse_create_pool_event_optimized(
     block_time_us: Option<i64>,
     grpc_recv_us: i64,
 ) -> Option<DexEvent> {
-    // 一次性边界检查 (含 IDL 最后一列 is_mayhem_mode: bool)
-    const CREATE_POOL_EVENT_LEN: usize = 326;
-    const REQUIRED_LEN: usize = CREATE_POOL_EVENT_LEN;
-    if data.len() < REQUIRED_LEN {
-        return None;
-    }
-
-    unsafe {
-        let timestamp = read_i64_unchecked(data, 0);
-        let index = read_u16_unchecked(data, 8);
-
-        let creator = read_pubkey_unchecked(data, 10);
-        let base_mint = read_pubkey_unchecked(data, 42);
-        let quote_mint = read_pubkey_unchecked(data, 74);
-
-        let base_mint_decimals = read_u8_unchecked(data, 106);
-        let quote_mint_decimals = read_u8_unchecked(data, 107);
-
-        let base_amount_in = read_u64_unchecked(data, 108);
-        let quote_amount_in = read_u64_unchecked(data, 116);
-        let pool_base_amount = read_u64_unchecked(data, 124);
-        let pool_quote_amount = read_u64_unchecked(data, 132);
-        let minimum_liquidity = read_u64_unchecked(data, 140);
-        let initial_liquidity = read_u64_unchecked(data, 148);
-        let lp_token_amount_out = read_u64_unchecked(data, 156);
-
-        let pool_bump = read_u8_unchecked(data, 164);
-
-        let pool = read_pubkey_unchecked(data, 165);
-        let lp_mint = read_pubkey_unchecked(data, 197);
-        let user_base_token_account = read_pubkey_unchecked(data, 229);
-        let user_quote_token_account = read_pubkey_unchecked(data, 261);
-        let coin_creator = read_pubkey_unchecked(data, 293);
-        let is_mayhem_mode = read_bool_unchecked(data, 325);
-
-        let metadata = EventMetadata {
+    parse_create_pool_from_data(
+        data,
+        EventMetadata {
             signature,
             slot,
             tx_index,
             block_time_us: block_time_us.unwrap_or(0),
             grpc_recv_us,
             recent_blockhash: None,
-        };
-
-        Some(DexEvent::PumpSwapCreatePool(PumpSwapCreatePoolEvent {
-            metadata,
-            timestamp,
-            index,
-            creator,
-            base_mint,
-            quote_mint,
-            base_mint_decimals,
-            quote_mint_decimals,
-            base_amount_in,
-            quote_amount_in,
-            pool_base_amount,
-            pool_quote_amount,
-            minimum_liquidity,
-            initial_liquidity,
-            lp_token_amount_out,
-            pool_bump,
-            pool,
-            lp_mint,
-            user_base_token_account,
-            user_quote_token_account,
-            coin_creator,
-            is_mayhem_mode,
-            is_cashback_coin: false,
-        }))
-    }
+        },
+    )
 }
 
 /// 解析添加流动性事件 (极限优化)
@@ -448,59 +401,17 @@ fn parse_add_liquidity_event_optimized(
     block_time_us: Option<i64>,
     grpc_recv_us: i64,
 ) -> Option<DexEvent> {
-    const REQUIRED_LEN: usize = 10 * 8 + 5 * 32;
-    if data.len() < REQUIRED_LEN {
-        return None;
-    }
-
-    unsafe {
-        let timestamp = read_i64_unchecked(data, 0);
-        let lp_token_amount_out = read_u64_unchecked(data, 8);
-        let max_base_amount_in = read_u64_unchecked(data, 16);
-        let max_quote_amount_in = read_u64_unchecked(data, 24);
-        let user_base_token_reserves = read_u64_unchecked(data, 32);
-        let user_quote_token_reserves = read_u64_unchecked(data, 40);
-        let pool_base_token_reserves = read_u64_unchecked(data, 48);
-        let pool_quote_token_reserves = read_u64_unchecked(data, 56);
-        let base_amount_in = read_u64_unchecked(data, 64);
-        let quote_amount_in = read_u64_unchecked(data, 72);
-        let lp_mint_supply = read_u64_unchecked(data, 80);
-
-        let pool = read_pubkey_unchecked(data, 88);
-        let user = read_pubkey_unchecked(data, 120);
-        let user_base_token_account = read_pubkey_unchecked(data, 152);
-        let user_quote_token_account = read_pubkey_unchecked(data, 184);
-        let user_pool_token_account = read_pubkey_unchecked(data, 216);
-
-        let metadata = EventMetadata {
+    parse_add_liquidity_from_data(
+        data,
+        EventMetadata {
             signature,
             slot,
             tx_index,
             block_time_us: block_time_us.unwrap_or(0),
             grpc_recv_us,
             recent_blockhash: None,
-        };
-
-        Some(DexEvent::PumpSwapLiquidityAdded(PumpSwapLiquidityAdded {
-            metadata,
-            timestamp,
-            lp_token_amount_out,
-            max_base_amount_in,
-            max_quote_amount_in,
-            user_base_token_reserves,
-            user_quote_token_reserves,
-            pool_base_token_reserves,
-            pool_quote_token_reserves,
-            base_amount_in,
-            quote_amount_in,
-            lp_mint_supply,
-            pool,
-            user,
-            user_base_token_account,
-            user_quote_token_account,
-            user_pool_token_account,
-        }))
-    }
+        },
+    )
 }
 
 /// 解析移除流动性事件 (极限优化)
@@ -513,70 +424,25 @@ fn parse_remove_liquidity_event_optimized(
     block_time_us: Option<i64>,
     grpc_recv_us: i64,
 ) -> Option<DexEvent> {
-    const REQUIRED_LEN: usize = 10 * 8 + 5 * 32;
-    if data.len() < REQUIRED_LEN {
-        return None;
-    }
-
-    unsafe {
-        let timestamp = read_i64_unchecked(data, 0);
-        let lp_token_amount_in = read_u64_unchecked(data, 8);
-        let min_base_amount_out = read_u64_unchecked(data, 16);
-        let min_quote_amount_out = read_u64_unchecked(data, 24);
-        let user_base_token_reserves = read_u64_unchecked(data, 32);
-        let user_quote_token_reserves = read_u64_unchecked(data, 40);
-        let pool_base_token_reserves = read_u64_unchecked(data, 48);
-        let pool_quote_token_reserves = read_u64_unchecked(data, 56);
-        let base_amount_out = read_u64_unchecked(data, 64);
-        let quote_amount_out = read_u64_unchecked(data, 72);
-        let lp_mint_supply = read_u64_unchecked(data, 80);
-
-        let pool = read_pubkey_unchecked(data, 88);
-        let user = read_pubkey_unchecked(data, 120);
-        let user_base_token_account = read_pubkey_unchecked(data, 152);
-        let user_quote_token_account = read_pubkey_unchecked(data, 184);
-        let user_pool_token_account = read_pubkey_unchecked(data, 216);
-
-        let metadata = EventMetadata {
+    parse_remove_liquidity_from_data(
+        data,
+        EventMetadata {
             signature,
             slot,
             tx_index,
             block_time_us: block_time_us.unwrap_or(0),
             grpc_recv_us,
             recent_blockhash: None,
-        };
-
-        Some(DexEvent::PumpSwapLiquidityRemoved(
-            PumpSwapLiquidityRemoved {
-                metadata,
-                timestamp,
-                lp_token_amount_in,
-                min_base_amount_out,
-                min_quote_amount_out,
-                user_base_token_reserves,
-                user_quote_token_reserves,
-                pool_base_token_reserves,
-                pool_quote_token_reserves,
-                base_amount_out,
-                quote_amount_out,
-                lp_mint_supply,
-                pool,
-                user,
-                user_base_token_account,
-                user_quote_token_account,
-                user_pool_token_account,
-            },
-        ))
-    }
+        },
+    )
 }
 
 // ============================================================================
 // 快速过滤 API (用于事件过滤场景)
 // ============================================================================
 
-/// 快速判断事件类型 (只解析 discriminator)
-///
-/// 性能: <50ns
+/// Read the little-endian discriminator from at least eight decoded bytes.
+/// This is a prefix filter; use [`parse_log`] to validate the complete payload.
 #[inline(always)]
 pub fn get_event_type_fast(log: &str) -> Option<u64> {
     extract_discriminator_simd(log)
@@ -628,7 +494,12 @@ pub fn parse_buy_from_data(data: &[u8], metadata: EventMetadata) -> Option<DexEv
 
         let coin_creator_fee_basis_points = read_u64_unchecked(data, 336);
         let coin_creator_fee = read_u64_unchecked(data, 344);
-        let track_volume = read_bool_unchecked(data, 352);
+        // Borsh bools accept only 0/1. Reject malformed data before allocating.
+        let track_volume = match data[352] {
+            0 => false,
+            1 => true,
+            _ => return None,
+        };
         let total_unclaimed_tokens = read_u64_unchecked(data, 353);
         let total_claimed_tokens = read_u64_unchecked(data, 361);
         let current_sol_volume = read_u64_unchecked(data, 369);
@@ -669,7 +540,8 @@ pub fn parse_buy_from_data(data: &[u8], metadata: EventMetadata) -> Option<DexEv
             current_sol_volume,
             last_update_timestamp,
             min_base_amount_out,
-            ix_name,
+            // Allocate only after all fallible string/tail validation succeeds.
+            ix_name: ix_name.to_owned(),
             cashback_fee_basis_points: tail.cashback_fee_basis_points,
             cashback: tail.cashback,
             buyback_fee_basis_points: tail.buyback_fee_basis_points,
@@ -677,6 +549,8 @@ pub fn parse_buy_from_data(data: &[u8], metadata: EventMetadata) -> Option<DexEv
             virtual_quote_reserves: tail.virtual_quote_reserves,
             can_boost: tail.can_boost,
             base_supply: tail.base_supply,
+            holder_rewards_bps: tail.holder_rewards_bps,
+            holder_rewards: tail.holder_rewards,
             ..Default::default()
         }))
     }
@@ -752,6 +626,8 @@ pub fn parse_sell_from_data(data: &[u8], metadata: EventMetadata) -> Option<DexE
             virtual_quote_reserves: tail.virtual_quote_reserves,
             can_boost: tail.can_boost,
             base_supply: tail.base_supply,
+            holder_rewards_bps: tail.holder_rewards_bps,
+            holder_rewards: tail.holder_rewards,
             ..Default::default()
         }))
     }
@@ -761,8 +637,11 @@ pub fn parse_sell_from_data(data: &[u8], metadata: EventMetadata) -> Option<DexE
 #[inline(always)]
 pub fn parse_create_pool_from_data(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
     const CREATE_POOL_EVENT_LEN: usize = 326;
+    const CREATOR_FEE_EVENT_LEN: usize = 335;
     const REQUIRED_LEN: usize = CREATE_POOL_EVENT_LEN;
-    if data.len() < REQUIRED_LEN {
+    if data.len() < REQUIRED_LEN
+        || (data.len() != CREATE_POOL_EVENT_LEN && data.len() < CREATOR_FEE_EVENT_LEN)
+    {
         return None;
     }
 
@@ -792,7 +671,22 @@ pub fn parse_create_pool_from_data(data: &[u8], metadata: EventMetadata) -> Opti
         let user_base_token_account = read_pubkey_unchecked(data, 229);
         let user_quote_token_account = read_pubkey_unchecked(data, 261);
         let coin_creator = read_pubkey_unchecked(data, 293);
-        let is_mayhem_mode = data.len() > 325 && read_bool_unchecked(data, 325);
+        let is_mayhem_mode = read_borsh_bool_at(data, 325)?;
+        let creator_fee_bps = if data.len() >= 334 {
+            read_u64_unchecked(data, 326)
+        } else {
+            0
+        };
+        let can_edit_creator_fee = if data.len() > 334 {
+            read_borsh_bool_at(data, 334)?
+        } else {
+            false
+        };
+        let is_holder_reward = if data.len() > 335 {
+            read_borsh_bool_at(data, 335)?
+        } else {
+            false
+        };
 
         Some(DexEvent::PumpSwapCreatePool(PumpSwapCreatePoolEvent {
             metadata,
@@ -818,6 +712,9 @@ pub fn parse_create_pool_from_data(data: &[u8], metadata: EventMetadata) -> Opti
             coin_creator,
             is_mayhem_mode,
             is_cashback_coin: false,
+            creator_fee_bps,
+            can_edit_creator_fee,
+            is_holder_reward,
         }))
     }
 }
@@ -825,7 +722,7 @@ pub fn parse_create_pool_from_data(data: &[u8], metadata: EventMetadata) -> Opti
 /// Parse PumpSwap AddLiquidity event from pre-decoded data
 #[inline(always)]
 pub fn parse_add_liquidity_from_data(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
-    const REQUIRED_LEN: usize = 10 * 8 + 5 * 32;
+    const REQUIRED_LEN: usize = 11 * 8 + 5 * 32;
     if data.len() < REQUIRED_LEN {
         return None;
     }
@@ -874,7 +771,7 @@ pub fn parse_add_liquidity_from_data(data: &[u8], metadata: EventMetadata) -> Op
 /// Parse PumpSwap RemoveLiquidity event from pre-decoded data
 #[inline(always)]
 pub fn parse_remove_liquidity_from_data(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
-    const REQUIRED_LEN: usize = 10 * 8 + 5 * 32;
+    const REQUIRED_LEN: usize = 11 * 8 + 5 * 32;
     if data.len() < REQUIRED_LEN {
         return None;
     }
@@ -976,6 +873,15 @@ mod tests {
         data.extend_from_slice(&(-987_654_321i128).to_le_bytes());
         data.push(1); // can_boost
         data.extend_from_slice(&222u64.to_le_bytes()); // base_supply
+        data.extend_from_slice(&233u64.to_le_bytes()); // holder_rewards_bps
+        data.extend_from_slice(&244u64.to_le_bytes()); // holder_rewards
+    }
+
+    fn append_buyback_trade_tail(data: &mut Vec<u8>) {
+        data.extend_from_slice(&177u64.to_le_bytes()); // cashback_fee_basis_points
+        data.extend_from_slice(&188u64.to_le_bytes()); // cashback
+        data.extend_from_slice(&199u64.to_le_bytes()); // buyback_fee_basis_points
+        data.extend_from_slice(&211u64.to_le_bytes()); // buyback_fee
     }
 
     fn build_buy_payload(include_current_tail: bool) -> Vec<u8> {
@@ -1053,6 +959,9 @@ mod tests {
         write_pubkey(&mut data, 261, Pubkey::new_from_array([7; 32]));
         write_pubkey(&mut data, 293, Pubkey::new_from_array([8; 32]));
         data[325] = u8::from(is_mayhem_mode);
+        data.extend_from_slice(&250u64.to_le_bytes());
+        data.push(1);
+        data.push(1);
 
         data
     }
@@ -1113,6 +1022,8 @@ mod tests {
         assert_eq!(event.virtual_quote_reserves, -987_654_321);
         assert!(event.can_boost);
         assert_eq!(event.base_supply, 222);
+        assert_eq!(event.holder_rewards_bps, 233);
+        assert_eq!(event.holder_rewards, 244);
     }
 
     #[test]
@@ -1130,6 +1041,8 @@ mod tests {
         assert_eq!(event.metadata.slot, 7);
         assert_eq!(event.virtual_quote_reserves, -987_654_321);
         assert!(event.can_boost);
+        assert_eq!(event.holder_rewards_bps, 233);
+        assert_eq!(event.holder_rewards, 244);
     }
 
     #[test]
@@ -1150,6 +1063,8 @@ mod tests {
         assert_eq!(event.virtual_quote_reserves, -987_654_321);
         assert!(event.can_boost);
         assert_eq!(event.base_supply, 222);
+        assert_eq!(event.holder_rewards_bps, 233);
+        assert_eq!(event.holder_rewards, 244);
     }
 
     #[test]
@@ -1183,7 +1098,7 @@ mod tests {
         assert!(parse_buy_from_data(&invalid_utf8, metadata()).is_none());
 
         let legacy = build_buy_payload(false);
-        for partial_len in [1, 15, 17, 31, 33, 56] {
+        for partial_len in [1, 15, 17, 31, 33, 56, 58, 72] {
             let mut partial = legacy.clone();
             partial.resize(legacy.len() + partial_len, 0);
             assert!(parse_buy_from_data(&partial, metadata()).is_none());
@@ -1197,7 +1112,7 @@ mod tests {
         }
 
         let legacy = build_sell_payload(false);
-        for partial_len in [1, 15, 17, 31, 33, 56] {
+        for partial_len in [1, 15, 17, 31, 33, 56, 58, 72] {
             let mut partial = legacy.clone();
             partial.resize(legacy.len() + partial_len, 0);
             assert!(parse_sell_from_data(&partial, metadata()).is_none());
@@ -1207,6 +1122,55 @@ mod tests {
         append_current_trade_tail(&mut invalid_bool);
         invalid_bool[352 + 48] = 2;
         assert!(parse_sell_from_data(&invalid_bool, metadata()).is_none());
+    }
+
+    #[test]
+    fn parse_buyback_layouts_without_boost_fields() {
+        let mut buy = build_buy_payload(false);
+        append_buyback_trade_tail(&mut buy);
+        let DexEvent::PumpSwapBuy(buy) =
+            parse_buy_from_data(&buy, metadata()).expect("expected buyback buy event")
+        else {
+            panic!("expected PumpSwapBuy event");
+        };
+        assert_eq!(buy.cashback_fee_basis_points, 177);
+        assert_eq!(buy.buyback_fee_basis_points, 199);
+        assert_eq!(buy.buyback_fee, 211);
+        assert_eq!(buy.virtual_quote_reserves, 0);
+
+        let mut sell = build_sell_payload(false);
+        append_buyback_trade_tail(&mut sell);
+        let DexEvent::PumpSwapSell(sell) =
+            parse_sell_from_data(&sell, metadata()).expect("expected buyback sell event")
+        else {
+            panic!("expected PumpSwapSell event");
+        };
+        assert_eq!(sell.cashback_fee_basis_points, 177);
+        assert_eq!(sell.buyback_fee_basis_points, 199);
+        assert_eq!(sell.buyback_fee, 211);
+        assert_eq!(sell.virtual_quote_reserves, 0);
+    }
+
+    #[test]
+    fn trade_tail_accepts_only_complete_layouts() {
+        for len in 0..=80 {
+            let tail = vec![0u8; len];
+            let expected = matches!(len, 0 | 16 | 32 | 57 | 73..=80);
+            assert_eq!(
+                parse_trade_tail(&tail).is_some(),
+                expected,
+                "tail length {len}"
+            );
+        }
+
+        for invalid_bool in 2..=u8::MAX {
+            let mut tail = vec![0u8; 57];
+            tail[48] = invalid_bool;
+            assert!(
+                parse_trade_tail(&tail).is_none(),
+                "bool value {invalid_bool}"
+            );
+        }
     }
 
     #[test]
@@ -1221,5 +1185,20 @@ mod tests {
         assert_eq!(event.index, 42);
         assert!(event.is_mayhem_mode);
         assert!(!event.is_cashback_coin);
+        assert_eq!(event.creator_fee_bps, 250);
+        assert!(event.can_edit_creator_fee);
+        assert!(event.is_holder_reward);
+    }
+
+    #[test]
+    fn parse_create_pool_accepts_only_complete_layouts() {
+        for len in 326..=336 {
+            let expected = len == 326 || len >= 335;
+            assert_eq!(
+                parse_create_pool_from_data(&vec![0u8; len], metadata()).is_some(),
+                expected,
+                "create pool length {len}"
+            );
+        }
     }
 }

@@ -1,0 +1,497 @@
+{
+  "types": [
+    {
+      "name": "BuyEvent",
+      "docs": [
+        "ix_name: \"buy\" | \"buy_exact_quote_in\""
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "timestamp",
+            "type": "i64"
+          },
+          {
+            "name": "base_amount_out",
+            "type": "u64"
+          },
+          {
+            "name": "max_quote_amount_in",
+            "type": "u64"
+          },
+          {
+            "name": "user_base_token_reserves",
+            "type": "u64"
+          },
+          {
+            "name": "user_quote_token_reserves",
+            "type": "u64"
+          },
+          {
+            "name": "pool_base_token_reserves",
+            "type": "u64"
+          },
+          {
+            "name": "pool_quote_token_reserves",
+            "type": "u64"
+          },
+          {
+            "name": "quote_amount_in",
+            "type": "u64"
+          },
+          {
+            "name": "lp_fee_basis_points",
+            "type": "u64"
+          },
+          {
+            "name": "lp_fee",
+            "type": "u64"
+          },
+          {
+            "name": "protocol_fee_basis_points",
+            "type": "u64"
+          },
+          {
+            "name": "protocol_fee",
+            "type": "u64"
+          },
+          {
+            "name": "quote_amount_in_with_lp_fee",
+            "type": "u64"
+          },
+          {
+            "name": "user_quote_amount_in",
+            "type": "u64"
+          },
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "user_base_token_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "user_quote_token_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "protocol_fee_recipient",
+            "type": "pubkey"
+          },
+          {
+            "name": "protocol_fee_recipient_token_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "coin_creator",
+            "type": "pubkey"
+          },
+          {
+            "name": "coin_creator_fee_basis_points",
+            "type": "u64"
+          },
+          {
+            "name": "coin_creator_fee",
+            "type": "u64"
+          },
+          {
+            "name": "track_volume",
+            "type": "bool"
+          },
+          {
+            "name": "total_unclaimed_tokens",
+            "type": "u64"
+          },
+          {
+            "name": "total_claimed_tokens",
+            "type": "u64"
+          },
+          {
+            "name": "current_sol_volume",
+            "type": "u64"
+          },
+          {
+            "name": "last_update_timestamp",
+            "type": "i64"
+          },
+          {
+            "name": "min_base_amount_out",
+            "type": "u64"
+          },
+          {
+            "name": "ix_name",
+            "type": "string"
+          },
+          {
+            "name": "cashback_fee_basis_points",
+            "type": "u64"
+          },
+          {
+            "name": "cashback",
+            "type": "u64"
+          },
+          {
+            "name": "buyback_fee_basis_points",
+            "type": "u64"
+          },
+          {
+            "name": "buyback_fee",
+            "type": "u64"
+          },
+          {
+            "name": "virtual_quote_reserves",
+            "type": "i128"
+          },
+          {
+            "name": "can_boost",
+            "type": "bool"
+          },
+          {
+            "name": "base_supply",
+            "type": "u64"
+          },
+          {
+            "name": "holder_rewards_bps",
+            "type": "u64"
+          },
+          {
+            "name": "holder_rewards",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "GlobalConfig",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "admin",
+            "docs": [
+              "The admin pubkey"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "lp_fee_basis_points",
+            "type": "u64"
+          },
+          {
+            "name": "protocol_fee_basis_points",
+            "type": "u64"
+          },
+          {
+            "name": "disable_flags",
+            "docs": [
+              "Flags to disable certain functionality",
+              "bit 0 - Disable create pool",
+              "bit 1 - Disable deposit",
+              "bit 2 - Disable withdraw",
+              "bit 3 - Disable buy",
+              "bit 4 - Disable sell"
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "protocol_fee_recipients",
+            "docs": [
+              "Addresses of the protocol fee recipients"
+            ],
+            "type": {
+              "array": [
+                "pubkey",
+                8
+              ]
+            }
+          },
+          {
+            "name": "coin_creator_fee_basis_points",
+            "type": "u64"
+          },
+          {
+            "name": "admin_set_coin_creator_authority",
+            "docs": [
+              "The admin authority for setting coin creators"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "whitelist_pda",
+            "type": "pubkey"
+          },
+          {
+            "name": "reserved_fee_recipient",
+            "type": "pubkey"
+          },
+          {
+            "name": "mayhem_mode_enabled",
+            "type": "bool"
+          },
+          {
+            "name": "reserved_fee_recipients",
+            "type": {
+              "array": [
+                "pubkey",
+                7
+              ]
+            }
+          },
+          {
+            "name": "is_cashback_enabled",
+            "type": "bool"
+          },
+          {
+            "name": "buyback_fee_recipients",
+            "type": {
+              "array": [
+                "pubkey",
+                8
+              ]
+            }
+          },
+          {
+            "name": "buyback_basis_points",
+            "type": "u64"
+          },
+          {
+            "name": "boost_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "boost_enabled",
+            "type": "bool"
+          },
+          {
+            "name": "creator_fee_configurable",
+            "type": "bool"
+          },
+          {
+            "name": "max_configurable_creator_fee_bps",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Pool",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool_bump",
+            "type": "u8"
+          },
+          {
+            "name": "index",
+            "type": "u16"
+          },
+          {
+            "name": "creator",
+            "type": "pubkey"
+          },
+          {
+            "name": "base_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "quote_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "lp_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "pool_base_token_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "pool_quote_token_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "lp_supply",
+            "docs": [
+              "True circulating supply without burns and lock-ups"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "coin_creator",
+            "type": "pubkey"
+          },
+          {
+            "name": "is_mayhem_mode",
+            "type": "bool"
+          },
+          {
+            "name": "is_cashback_coin",
+            "type": "bool"
+          },
+          {
+            "name": "virtual_quote_reserves",
+            "docs": [
+              "For non-boost pools, value is 0, so the behavior is identical to legacy pools."
+            ],
+            "type": "i128"
+          },
+          {
+            "name": "creator_fee_bps",
+            "type": "u64"
+          },
+          {
+            "name": "can_edit_creator_fee",
+            "type": "bool"
+          },
+          {
+            "name": "is_holder_reward",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SellEvent",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "timestamp",
+            "type": "i64"
+          },
+          {
+            "name": "base_amount_in",
+            "type": "u64"
+          },
+          {
+            "name": "min_quote_amount_out",
+            "type": "u64"
+          },
+          {
+            "name": "user_base_token_reserves",
+            "type": "u64"
+          },
+          {
+            "name": "user_quote_token_reserves",
+            "type": "u64"
+          },
+          {
+            "name": "pool_base_token_reserves",
+            "type": "u64"
+          },
+          {
+            "name": "pool_quote_token_reserves",
+            "type": "u64"
+          },
+          {
+            "name": "quote_amount_out",
+            "type": "u64"
+          },
+          {
+            "name": "lp_fee_basis_points",
+            "type": "u64"
+          },
+          {
+            "name": "lp_fee",
+            "type": "u64"
+          },
+          {
+            "name": "protocol_fee_basis_points",
+            "type": "u64"
+          },
+          {
+            "name": "protocol_fee",
+            "type": "u64"
+          },
+          {
+            "name": "quote_amount_out_without_lp_fee",
+            "type": "u64"
+          },
+          {
+            "name": "user_quote_amount_out",
+            "type": "u64"
+          },
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "user_base_token_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "user_quote_token_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "protocol_fee_recipient",
+            "type": "pubkey"
+          },
+          {
+            "name": "protocol_fee_recipient_token_account",
+            "type": "pubkey"
+          },
+          {
+            "name": "coin_creator",
+            "type": "pubkey"
+          },
+          {
+            "name": "coin_creator_fee_basis_points",
+            "type": "u64"
+          },
+          {
+            "name": "coin_creator_fee",
+            "type": "u64"
+          },
+          {
+            "name": "cashback_fee_basis_points",
+            "type": "u64"
+          },
+          {
+            "name": "cashback",
+            "type": "u64"
+          },
+          {
+            "name": "buyback_fee_basis_points",
+            "type": "u64"
+          },
+          {
+            "name": "buyback_fee",
+            "type": "u64"
+          },
+          {
+            "name": "virtual_quote_reserves",
+            "type": "i128"
+          },
+          {
+            "name": "can_boost",
+            "type": "bool"
+          },
+          {
+            "name": "base_supply",
+            "type": "u64"
+          },
+          {
+            "name": "holder_rewards_bps",
+            "type": "u64"
+          },
+          {
+            "name": "holder_rewards",
+            "type": "u64"
+          }
+        ]
+      }
+    }
+  ]
+}

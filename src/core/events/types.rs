@@ -699,6 +699,10 @@ pub struct PumpSwapBuyEvent {
     /// Base token supply after the trade.
     #[serde(default)]
     pub base_supply: u64,
+    #[serde(default)]
+    pub holder_rewards_bps: u64,
+    #[serde(default)]
+    pub holder_rewards: u64,
 
     // === 额外的信息 ===
     #[borsh(skip)]
@@ -777,6 +781,10 @@ pub struct PumpSwapSellEvent {
     /// Base token supply after the trade.
     #[serde(default)]
     pub base_supply: u64,
+    #[serde(default)]
+    pub holder_rewards_bps: u64,
+    #[serde(default)]
+    pub holder_rewards: u64,
 
     // === 额外的信息 ===
     #[borsh(skip)]
@@ -837,6 +845,15 @@ pub struct PumpSwapCreatePoolEvent {
     /// not carry this value, so log-only parses keep the default `false`.
     #[serde(default)]
     pub is_cashback_coin: bool,
+    /// Coin-specific creator fee rate carried over from the bonding curve.
+    #[serde(default)]
+    pub creator_fee_bps: u64,
+    /// Reserved by the program; currently always false.
+    #[serde(default)]
+    pub can_edit_creator_fee: bool,
+    /// Whether creator fees are distributed to holders.
+    #[serde(default)]
+    pub is_holder_reward: bool,
 }
 
 /// PumpSwap Pool Created Event - 指令解析版本
@@ -1723,6 +1740,20 @@ pub struct PumpSwapGlobalConfig {
     pub reserved_fee_recipient: Pubkey,
     pub mayhem_mode_enabled: bool,
     pub reserved_fee_recipients: [Pubkey; 7],
+    #[serde(default)]
+    pub is_cashback_enabled: bool,
+    #[serde(default)]
+    pub buyback_fee_recipients: [Pubkey; 8],
+    #[serde(default)]
+    pub buyback_basis_points: u64,
+    #[serde(default)]
+    pub boost_authority: Pubkey,
+    #[serde(default)]
+    pub boost_enabled: bool,
+    #[serde(default)]
+    pub creator_fee_configurable: bool,
+    #[serde(default)]
+    pub max_configurable_creator_fee_bps: u64,
 }
 
 /// PumpSwap Pool Account Event
@@ -1755,6 +1786,12 @@ pub struct PumpSwapPool {
     /// zero. Add to the raw quote-vault balance in i128 for buy and sell pricing.
     #[serde(default)]
     pub virtual_quote_reserves: i128,
+    #[serde(default)]
+    pub creator_fee_bps: u64,
+    #[serde(default)]
+    pub can_edit_creator_fee: bool,
+    #[serde(default)]
+    pub is_holder_reward: bool,
 }
 
 /// PumpFun Bonding Curve Account Event

@@ -108,6 +108,12 @@ pub fn read_option_bool_idl(data: &[u8], offset: usize) -> Option<bool> {
     }
 }
 
+/// IDL OptionU64 wraps one u64 with no option discriminator.
+#[inline(always)]
+pub fn read_option_u64_idl(data: &[u8], offset: usize) -> Option<u64> {
+    read_u64_le(data, offset)
+}
+
 /// 从指令数据中读取公钥 - SIMD 优化
 #[inline(always)]
 pub fn read_pubkey(data: &[u8], offset: usize) -> Option<Pubkey> {

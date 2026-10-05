@@ -578,6 +578,14 @@ pub fn can_merge(base: &DexEvent, inner: &DexEvent) -> bool {
         // PumpFun Migrate 可以合并
         (DexEvent::PumpFunMigrate(_), DexEvent::PumpFunMigrate(_)) => true,
 
+        // Keep PumpSwap compatibility aligned with try_merge_events.
+        (DexEvent::PumpSwapTrade(_), DexEvent::PumpSwapTrade(_))
+        | (DexEvent::PumpSwapBuy(_), DexEvent::PumpSwapBuy(_))
+        | (DexEvent::PumpSwapSell(_), DexEvent::PumpSwapSell(_))
+        | (DexEvent::PumpSwapCreatePool(_), DexEvent::PumpSwapCreatePool(_))
+        | (DexEvent::PumpSwapLiquidityAdded(_), DexEvent::PumpSwapLiquidityAdded(_))
+        | (DexEvent::PumpSwapLiquidityRemoved(_), DexEvent::PumpSwapLiquidityRemoved(_)) => true,
+
         // 其他组合不支持合并
         _ => false,
     }
@@ -959,6 +967,11 @@ fn merge_pumpswap_create_pool_log_preferred(
     fill_pk(&mut log.coin_creator, ix.coin_creator);
     log.is_mayhem_mode |= ix.is_mayhem_mode;
     log.is_cashback_coin |= ix.is_cashback_coin;
+    if log.creator_fee_bps == 0 {
+        log.creator_fee_bps = ix.creator_fee_bps;
+    }
+    log.can_edit_creator_fee |= ix.can_edit_creator_fee;
+    log.is_holder_reward |= ix.is_holder_reward;
 }
 
 #[inline]

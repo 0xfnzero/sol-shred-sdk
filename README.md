@@ -88,7 +88,7 @@ Add the dependency to your `Cargo.toml`:
 
 ```toml
 # Add to your Cargo.toml
-sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.0" }
+sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.1" }
 ```
 
 ### Use crates.io
@@ -96,10 +96,16 @@ sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.0" }
 ```toml
 # Add to your Cargo.toml
 [dependencies]
-sol-shred-sdk = "4.0.0"
+sol-shred-sdk = "4.0.1"
 ```
 
 ## PumpSwap Effective Quote Reserves
+
+Raw shreds contain outer transaction instructions, without execution logs, inner
+CPI, Pool state or vault balances. Zero reserve/fee fields in outer Buy/Sell
+events mean unavailable data. Quote from a coherent, premaintained account and
+fee configuration cache. The instruction's `min_base_amount_out` is a lower
+bound, not an executed fill; buy parsing preserves `track_volume` and `ix_name`.
 
 PumpSwap Pool accounts and Buy/Sell events expose the appended signed
 `virtual_quote_reserves` field. For quoting and indexing, use:
@@ -123,8 +129,11 @@ assert_eq!(quote_reserve, 500);
 ```
 
 The helper adds in `i128` before converting to `u64`. PumpSwap guarantees the
-effective reserve fits in `u64`; the helper additionally returns `None` for invalid
-or inconsistent inputs. See the [official negative reserve update](https://github.com/pump-fun/pump-public-docs/blob/main/docs/NEGATIVE_VIRTUAL_QUOTE_RESERVES.md).
+effective reserve fits in `u64`; the helper returns `None` for a negative sum or
+a sum above `u64::MAX`. A valid sum does not establish Pool/vault snapshot
+consistency; maintain that consistency in the account cache. See the [official negative reserve update](https://github.com/pump-fun/pump-public-docs/blob/main/docs/NEGATIVE_VIRTUAL_QUOTE_RESERVES.md).
+
+See [real RPC examples and validation limits](examples/PUMPSWAP_RPC.md).
 
 ## Decode Mode
 
