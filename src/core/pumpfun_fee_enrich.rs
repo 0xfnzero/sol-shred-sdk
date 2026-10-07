@@ -157,6 +157,9 @@ fn fill_pk_if_default(to: &mut Pubkey, from: Pubkey) {
 
 #[inline]
 fn fill_pumpfun_quote_mint_if_default(to: &mut Pubkey, from: Pubkey) {
+    if from == Pubkey::default() {
+        return;
+    }
     let from = normalize_pumpfun_quote_mint(from);
     if (*to == Pubkey::default() || is_pumpfun_solscan_sol_quote_mint(*to))
         && from != Pubkey::default()
@@ -210,8 +213,10 @@ fn fill_create_v2_from_create(
         &mut create_v2.virtual_quote_reserves,
         create.virtual_quote_reserves,
     );
+    fill_u64_if_zero(&mut create_v2.creator_fee_bps, create.creator_fee_bps);
     create_v2.is_mayhem_mode |= create.is_mayhem_mode;
     create_v2.is_cashback_enabled |= create.is_cashback_enabled;
+    create_v2.is_holder_reward |= create.is_holder_reward;
 }
 
 /// Copy the official `CreateEvent` payload onto the same-mint `create_v2` instruction event.
@@ -392,6 +397,8 @@ mod tests {
                 is_cashback_enabled: true,
                 quote_mint,
                 virtual_quote_reserves: 4_292_000_000,
+                creator_fee_bps: 300,
+                is_holder_reward: true,
                 ..Default::default()
             }),
         ];
@@ -403,6 +410,8 @@ mod tests {
             assert_eq!(c.virtual_quote_reserves, 4_292_000_000);
             assert_eq!(c.token_program, token_program);
             assert!(c.is_cashback_enabled);
+            assert_eq!(c.creator_fee_bps, 300);
+            assert!(c.is_holder_reward);
             assert_eq!(c.name, "USD Coin Pool");
         } else {
             panic!("expected CreateV2");

@@ -232,6 +232,10 @@ fn put_pk_if_set(to: &mut Pubkey, from: Pubkey) {
 
 #[inline(always)]
 fn put_pumpfun_quote_mint_if_set(to: &mut Pubkey, from: Pubkey) {
+    // Instruction-only events use default for an unresolved quote, not native SOL.
+    if from == Pubkey::default() {
+        return;
+    }
     let from = normalize_pumpfun_quote_mint(from);
     if from != Pubkey::default()
         && (*to == Pubkey::default()
@@ -458,6 +462,8 @@ fn merge_pumpfun_create(base: &mut PumpFunCreateTokenEvent, inner: PumpFunCreate
         &mut base.virtual_quote_reserves,
         inner.virtual_quote_reserves,
     );
+    put_u64_if_nonzero(&mut base.creator_fee_bps, inner.creator_fee_bps);
+    base.is_holder_reward |= inner.is_holder_reward;
 }
 
 /// 合并 PumpFun CreateV2 事件
@@ -488,6 +494,8 @@ fn merge_pumpfun_create_v2(base: &mut PumpFunCreateV2TokenEvent, inner: PumpFunC
         &mut base.virtual_quote_reserves,
         inner.virtual_quote_reserves,
     );
+    put_u64_if_nonzero(&mut base.creator_fee_bps, inner.creator_fee_bps);
+    base.is_holder_reward |= inner.is_holder_reward;
     put_pk_if_set(&mut base.mint_authority, inner.mint_authority);
     put_pk_if_set(
         &mut base.associated_bonding_curve,
@@ -604,6 +612,9 @@ fn fill_pk(to: &mut Pubkey, from: Pubkey) {
 
 #[inline(always)]
 fn fill_pumpfun_quote_mint(to: &mut Pubkey, from: Pubkey) {
+    if from == Pubkey::default() {
+        return;
+    }
     let from = normalize_pumpfun_quote_mint(from);
     if (*to == Pubkey::default() || is_pumpfun_solscan_sol_quote_mint(*to))
         && from != Pubkey::default()
@@ -710,11 +721,15 @@ fn merge_pumpfun_create_log_preferred(
     fill_pk(&mut log.quote_vault, ix.quote_vault);
     fill_pk(&mut log.quote_token_program, ix.quote_token_program);
     put_u64_if_nonzero(&mut log.virtual_quote_reserves, ix.virtual_quote_reserves);
+    if log.creator_fee_bps == 0 {
+        log.creator_fee_bps = ix.creator_fee_bps;
+    }
     if log.ix_name.is_empty() && !ix.ix_name.is_empty() {
         log.ix_name = ix.ix_name;
     }
     log.is_mayhem_mode |= ix.is_mayhem_mode;
     log.is_cashback_enabled |= ix.is_cashback_enabled;
+    log.is_holder_reward |= ix.is_holder_reward;
 }
 
 #[inline]
@@ -741,11 +756,15 @@ fn merge_pumpfun_create_v2_into_create_log_preferred(
     fill_pk(&mut log.quote_vault, ix.quote_vault);
     fill_pk(&mut log.quote_token_program, ix.quote_token_program);
     put_u64_if_nonzero(&mut log.virtual_quote_reserves, ix.virtual_quote_reserves);
+    if log.creator_fee_bps == 0 {
+        log.creator_fee_bps = ix.creator_fee_bps;
+    }
     if log.ix_name.is_empty() && !ix.ix_name.is_empty() {
         log.ix_name = ix.ix_name;
     }
     log.is_mayhem_mode |= ix.is_mayhem_mode;
     log.is_cashback_enabled |= ix.is_cashback_enabled;
+    log.is_holder_reward |= ix.is_holder_reward;
 }
 
 #[inline]
@@ -772,11 +791,15 @@ fn merge_pumpfun_create_into_create_v2_log_preferred(
     fill_pk(&mut log.quote_vault, ix.quote_vault);
     fill_pk(&mut log.quote_token_program, ix.quote_token_program);
     put_u64_if_nonzero(&mut log.virtual_quote_reserves, ix.virtual_quote_reserves);
+    if log.creator_fee_bps == 0 {
+        log.creator_fee_bps = ix.creator_fee_bps;
+    }
     if log.ix_name.is_empty() && !ix.ix_name.is_empty() {
         log.ix_name = ix.ix_name;
     }
     log.is_mayhem_mode |= ix.is_mayhem_mode;
     log.is_cashback_enabled |= ix.is_cashback_enabled;
+    log.is_holder_reward |= ix.is_holder_reward;
 }
 
 #[inline]
@@ -795,9 +818,15 @@ fn merge_pumpfun_create_v2_log_preferred(
     fill_pk(&mut log.quote_vault, ix.quote_vault);
     fill_pk(&mut log.quote_token_program, ix.quote_token_program);
     put_u64_if_nonzero(&mut log.virtual_quote_reserves, ix.virtual_quote_reserves);
+    if log.creator_fee_bps == 0 {
+        log.creator_fee_bps = ix.creator_fee_bps;
+    }
     if log.ix_name.is_empty() && !ix.ix_name.is_empty() {
         log.ix_name = ix.ix_name;
     }
+    log.is_mayhem_mode |= ix.is_mayhem_mode;
+    log.is_cashback_enabled |= ix.is_cashback_enabled;
+    log.is_holder_reward |= ix.is_holder_reward;
     fill_pk(&mut log.mint_authority, ix.mint_authority);
     fill_pk(
         &mut log.associated_bonding_curve,

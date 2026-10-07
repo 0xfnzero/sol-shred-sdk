@@ -1,0 +1,73 @@
+{
+  "source": "https://github.com/pump-fun/pump-public-docs/blob/e0687ae9b7e064a0f54efc7297c65eecfbba3a8f/idl/pump.json",
+  "idl_sha256": "ffe966c42f1af41652ee753fe2f1e3f7cd4077d7e6f49faf3138959c8b56064b",
+  "sdk_version": "@pump-fun/pump-sdk@2.0.0",
+  "sdk_quote_remaining_accounts": [
+    "quote_mint",
+    "quote_vault",
+    "quote_token_program",
+    "quote_control"
+  ],
+  "instructions": [
+    {
+      "name": "create",
+      "discriminator": [
+        24,
+        30,
+        200,
+        40,
+        5,
+        28,
+        7,
+        119
+      ],
+      "accounts": [
+        "mint",
+        "mint_authority",
+        "bonding_curve",
+        "associated_bonding_curve",
+        "global",
+        "mpl_token_metadata",
+        "metadata",
+        "user",
+        "system_program",
+        "token_program",
+        "associated_token_program",
+        "rent",
+        "event_authority",
+        "program"
+      ]
+    },
+    {
+      "name": "create_v2",
+      "discriminator": [
+        214,
+        144,
+        76,
+        236,
+        95,
+        139,
+        49,
+        180
+      ],
+      "accounts": [
+        "mint",
+        "mint_authority",
+        "bonding_curve",
+        "associated_bonding_curve",
+        "global",
+        "user",
+        "system_program",
+        "token_program",
+        "associated_token_program",
+        "mayhem_program_id",
+        "global_params",
+        "sol_vault",
+        "mayhem_state",
+        "mayhem_token_vault",
+        "event_authority",
+        "program"
+      ]
+    }
+  ]
+}

@@ -88,7 +88,7 @@ Add the dependency to your `Cargo.toml`:
 
 ```toml
 # Add to your Cargo.toml
-sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.1" }
+sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.2" }
 ```
 
 ### Use crates.io
@@ -96,8 +96,10 @@ sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.1" }
 ```toml
 # Add to your Cargo.toml
 [dependencies]
-sol-shred-sdk = "4.0.1"
+sol-shred-sdk = "4.0.2"
 ```
+
+PumpFun create/create_v2 account layout and RPC regression details: [PUMPFUN_CREATE_LAYOUT.md](docs/PUMPFUN_CREATE_LAYOUT.md).
 
 ## PumpSwap Effective Quote Reserves
 

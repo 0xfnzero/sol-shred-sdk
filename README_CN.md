@@ -85,7 +85,7 @@ git clone https://github.com/0xfnzero/sol-shred-sdk
 
 ```toml
 # 添加到您的 Cargo.toml
-sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.1" }
+sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.2" }
 ```
 
 ### 使用 crates.io
@@ -93,8 +93,10 @@ sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.1" }
 ```toml
 # 添加到您的 Cargo.toml
 [dependencies]
-sol-shred-sdk = "4.0.1"
+sol-shred-sdk = "4.0.2"
 ```
+
+PumpFun create/create_v2 账户布局与 RPC 回归验证：[PUMPFUN_CREATE_LAYOUT.md](docs/PUMPFUN_CREATE_LAYOUT.md)。
 
 ## PumpSwap 有效 Quote Reserves
 

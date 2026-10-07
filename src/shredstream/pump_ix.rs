@@ -4,6 +4,9 @@
 //! - 避免每笔交易克隆整张 `static_account_keys`、避免 `Vec<IxRef>` 指令副本。
 //! - Pump.fun 使用专用外层热路径；其它已支持 DEX 协议走统一指令解析入口。
 
+use crate::instr::pump::create_layout::{
+    create as create_accounts, create_v2 as create_v2_accounts,
+};
 use smallvec::SmallVec;
 use solana_sdk::message::VersionedMessage;
 use solana_sdk::pubkey::Pubkey;
@@ -24,9 +27,7 @@ use crate::instr::program_ids::{
 };
 use crate::instr::pump::discriminators;
 use crate::instr::pump::PROGRAM_ID_PUBKEY;
-use crate::instr::utils::{
-    read_bool, read_option_bool_idl, read_pubkey, read_str_unchecked, read_u64_le,
-};
+use crate::instr::utils::{read_option_bool_idl, read_pubkey, read_str_unchecked, read_u64_le};
 
 type PumpMintSet = SmallVec<[Pubkey; 4]>;
 type ShredIxAccounts = SmallVec<[Pubkey; 64]>;
@@ -125,35 +126,6 @@ fn token_program_or_default(token_program: Pubkey) -> Pubkey {
 #[inline(always)]
 fn quote_mint_from_shred_v2_account(quote_mint: Option<Pubkey>) -> Pubkey {
     normalize_pumpfun_quote_mint(quote_mint.unwrap_or_default())
-}
-
-#[inline(always)]
-fn create_v2_quote_accounts_from_shred_accounts(
-    accounts_len: usize,
-    get_account: impl Fn(usize) -> Option<Pubkey>,
-) -> (Pubkey, Pubkey, Pubkey) {
-    if accounts_len < 19 {
-        return (
-            PUMPFUN_SOLSCAN_SOL_QUOTE_MINT,
-            Pubkey::default(),
-            Pubkey::default(),
-        );
-    }
-    let quote_mint = get_account(16).unwrap_or_default();
-    let quote_vault = get_account(17).unwrap_or_default();
-    let quote_token_program = get_account(18).unwrap_or_default();
-    if quote_mint == Pubkey::default()
-        || quote_mint == PROGRAM_ID_PUBKEY
-        || quote_vault == Pubkey::default()
-        || quote_token_program == Pubkey::default()
-    {
-        return (Pubkey::default(), Pubkey::default(), Pubkey::default());
-    }
-    (
-        quote_mint_from_shred_v2_account(Some(quote_mint)),
-        quote_vault,
-        quote_token_program,
-    )
 }
 
 #[inline]
@@ -567,7 +539,7 @@ fn parse_pumpfun_instruction(
     let disc: [u8; 8] = data[0..8].try_into().ok()?;
     let ix_data = &data[8..];
 
-    match disc {
+    let mut event = match disc {
         d if d == discriminators::CREATE => {
             parse_create_instruction(data, accounts, signature, slot, tx_index, recv_us)
         }
@@ -624,7 +596,16 @@ fn parse_pumpfun_instruction(
             parse_migrate_bonding_curve_creator_shred(accounts, signature, slot, tx_index, recv_us)
         }
         _ => None,
+    }?;
+    if let DexEvent::PumpFunCreate(create) = &mut event {
+        let get = |i| accounts.get(i).copied().unwrap_or_default();
+        if disc == discriminators::CREATE {
+            crate::core::account_fillers::pumpfun::fill_create_accounts(create, &get);
+        } else if disc == discriminators::CREATE_V2 {
+            crate::core::account_fillers::pumpfun::fill_create_accounts_from_v2(create, &get);
+        }
     }
+    Some(event)
 }
 
 /// `migrate_bonding_curve_creator` 外层 ix（`idls/pumpfun.json`）；无链上事件体时 `timestamp=0`，
@@ -683,36 +664,28 @@ fn parse_create_instruction(
 
     let mut offset = 8;
 
-    let name = if let Some((s, len)) = read_str_unchecked(data, offset) {
-        offset += len;
-        s.to_string()
-    } else {
-        String::new()
-    };
+    let (name, len) = read_str_unchecked(data, offset)?;
+    offset += len;
+    let name = name.to_string();
 
-    let symbol = if let Some((s, len)) = read_str_unchecked(data, offset) {
-        offset += len;
-        s.to_string()
-    } else {
-        String::new()
-    };
+    let (symbol, len) = read_str_unchecked(data, offset)?;
+    offset += len;
+    let symbol = symbol.to_string();
 
-    let uri = if let Some((s, len)) = read_str_unchecked(data, offset) {
-        offset += len;
-        s.to_string()
-    } else {
-        String::new()
-    };
+    let (uri, len) = read_str_unchecked(data, offset)?;
+    offset += len;
+    let uri = uri.to_string();
 
-    let creator = if offset + 32 <= data.len() {
-        read_pubkey(data, offset).unwrap_or_default()
-    } else {
+    // Historical create instructions had no creator argument; partial keys are invalid.
+    let creator = if offset == data.len() {
         Pubkey::default()
+    } else {
+        read_pubkey(data, offset)?
     };
 
-    let mint = get_account(0)?;
-    let bonding_curve = get_account(2).unwrap_or_default();
-    let user = get_account(7).unwrap_or_default();
+    let mint = get_account(create_accounts::MINT)?;
+    let bonding_curve = get_account(create_accounts::BONDING_CURVE).unwrap_or_default();
+    let user = get_account(create_accounts::USER).unwrap_or_default();
 
     let metadata = EventMetadata {
         signature,
@@ -732,7 +705,7 @@ fn parse_create_instruction(
         bonding_curve,
         user,
         creator,
-        token_program: get_account(9).unwrap_or_default(),
+        token_program: get_account(create_accounts::TOKEN_PROGRAM).unwrap_or_default(),
         quote_mint: PUMPFUN_SOLSCAN_SOL_QUOTE_MINT,
         ix_name: "create".to_string(),
         ..Default::default()
@@ -748,7 +721,7 @@ fn parse_create_v2_instruction(
     tx_index: u64,
     recv_us: i64,
 ) -> Option<DexEvent> {
-    const CREATE_V2_MIN_ACCOUNTS: usize = 16;
+    const CREATE_V2_MIN_ACCOUNTS: usize = create_v2_accounts::LEN;
     if accounts.len() < CREATE_V2_MIN_ACCOUNTS {
         return None;
     }
@@ -757,36 +730,25 @@ fn parse_create_v2_instruction(
 
     let payload = &data[8..];
     let mut offset = 0usize;
-    let name = if let Some((s, len)) = read_str_unchecked(payload, offset) {
-        offset += len;
-        s.to_string()
-    } else {
-        String::new()
-    };
-    let symbol = if let Some((s, len)) = read_str_unchecked(payload, offset) {
-        offset += len;
-        s.to_string()
-    } else {
-        String::new()
-    };
-    let uri = if let Some((s, len)) = read_str_unchecked(payload, offset) {
-        offset += len;
-        s.to_string()
-    } else {
-        String::new()
-    };
+    let (name, len) = read_str_unchecked(payload, offset)?;
+    offset += len;
+    let (symbol, len) = read_str_unchecked(payload, offset)?;
+    offset += len;
+    let (uri, len) = read_str_unchecked(payload, offset)?;
+    offset += len;
     if payload.len() < offset + 32 + 1 {
         return None;
     }
     let creator = read_pubkey(payload, offset).unwrap_or_default();
     offset += 32;
-    let is_mayhem_mode = read_bool(payload, offset).unwrap_or(false);
+    let is_mayhem_mode = read_option_bool_idl(payload, offset)?;
     offset += 1;
-    let is_cashback_enabled = read_option_bool_idl(payload, offset).unwrap_or(false);
+    let (is_cashback_enabled, creator_fee_bps, is_holder_reward) =
+        crate::instr::utils::parse_create_v2_optional_tail(&payload[offset..])?;
 
-    let mint = get_account(0)?;
-    let bonding_curve = get_account(2).unwrap_or_default();
-    let user = get_account(5).unwrap_or_default();
+    let mint = get_account(create_v2_accounts::MINT)?;
+    let bonding_curve = get_account(create_v2_accounts::BONDING_CURVE).unwrap_or_default();
+    let user = get_account(create_v2_accounts::USER).unwrap_or_default();
 
     let metadata = EventMetadata {
         signature,
@@ -797,34 +759,38 @@ fn parse_create_v2_instruction(
         recent_blockhash: None,
     };
 
-    let mayhem_program_id = get_account(9).unwrap_or_default();
+    let mayhem_program_id = get_account(create_v2_accounts::MAYHEM_PROGRAM_ID).unwrap_or_default();
     let (quote_mint, quote_vault, quote_token_program) =
-        create_v2_quote_accounts_from_shred_accounts(accounts.len(), get_account);
+        crate::instr::pump::create_v2_quote_accounts(accounts.len(), get_account);
 
     Some(DexEvent::PumpFunCreate(PumpFunCreateTokenEvent {
         metadata,
-        name,
-        symbol,
-        uri,
+        name: name.to_string(),
+        symbol: symbol.to_string(),
+        uri: uri.to_string(),
         mint,
         bonding_curve,
         user,
         creator,
-        mint_authority: get_account(1).unwrap_or_default(),
-        associated_bonding_curve: get_account(3).unwrap_or_default(),
-        global: get_account(4).unwrap_or_default(),
-        system_program: get_account(6).unwrap_or_default(),
-        token_program: get_account(7).unwrap_or_default(),
-        associated_token_program: get_account(8).unwrap_or_default(),
+        mint_authority: get_account(create_v2_accounts::MINT_AUTHORITY).unwrap_or_default(),
+        associated_bonding_curve: get_account(create_v2_accounts::ASSOCIATED_BONDING_CURVE)
+            .unwrap_or_default(),
+        global: get_account(create_v2_accounts::GLOBAL).unwrap_or_default(),
+        system_program: get_account(create_v2_accounts::SYSTEM_PROGRAM).unwrap_or_default(),
+        token_program: get_account(create_v2_accounts::TOKEN_PROGRAM).unwrap_or_default(),
+        associated_token_program: get_account(create_v2_accounts::ASSOCIATED_TOKEN_PROGRAM)
+            .unwrap_or_default(),
         mayhem_program_id,
-        global_params: get_account(10).unwrap_or_default(),
-        sol_vault: get_account(11).unwrap_or_default(),
-        mayhem_state: get_account(12).unwrap_or_default(),
-        mayhem_token_vault: get_account(13).unwrap_or_default(),
-        event_authority: get_account(14).unwrap_or_default(),
-        program: get_account(15).unwrap_or_default(),
+        global_params: get_account(create_v2_accounts::GLOBAL_PARAMS).unwrap_or_default(),
+        sol_vault: get_account(create_v2_accounts::SOL_VAULT).unwrap_or_default(),
+        mayhem_state: get_account(create_v2_accounts::MAYHEM_STATE).unwrap_or_default(),
+        mayhem_token_vault: get_account(create_v2_accounts::MAYHEM_TOKEN_VAULT).unwrap_or_default(),
+        event_authority: get_account(create_v2_accounts::EVENT_AUTHORITY).unwrap_or_default(),
+        program: get_account(create_v2_accounts::PROGRAM).unwrap_or_default(),
         is_mayhem_mode,
         is_cashback_enabled,
+        creator_fee_bps,
+        is_holder_reward,
         quote_mint,
         quote_vault,
         quote_token_program,
@@ -1643,8 +1609,7 @@ mod tests {
         let bonding_curve = static_keys[3];
         let user = static_keys[11];
         let token_program = static_keys[4];
-        let mut ix_accounts = vec![5, 1, 3, 2, 6, 7, 8, 11, 10, 4];
-        ix_accounts[8] = 44;
+        let ix_accounts = vec![5, 1, 3, 2, 6, 7, 8, 11, 10, 4];
 
         let tx = v0_tx(9, static_keys, ix_accounts, create_data());
         let mut events = Vec::new();
@@ -1677,6 +1642,7 @@ mod tests {
         let mut static_keys = vec![Pubkey::new_unique(); 20];
         static_keys[19] = PROGRAM_ID_PUBKEY;
         static_keys[16] = PUMPFUN_WSOL_QUOTE_MINT;
+        static_keys[18] = crate::accounts::program_ids::SPL_TOKEN_PROGRAM_ID;
         let tx = v0_tx(19, static_keys, ix_accounts(19), create_v2_data());
         let mut events = Vec::new();
 
@@ -1695,6 +1661,8 @@ mod tests {
             DexEvent::PumpFunCreate(event) => {
                 assert_eq!(event.ix_name, "create_v2");
                 assert_eq!(event.quote_mint, PUMPFUN_WSOL_QUOTE_MINT);
+                assert_eq!(event.creator_fee_bps, 0);
+                assert!(!event.is_holder_reward);
             }
             other => panic!("expected PumpFunCreate, got {other:?}"),
         }
@@ -2568,5 +2536,79 @@ mod tests {
             9,
         )
         .is_none());
+    }
+
+    #[test]
+    fn shred_pumpfun_create_v2_reads_holder_rewards_tail() {
+        let mut static_keys = vec![Pubkey::new_unique(); 17];
+        static_keys[16] = PROGRAM_ID_PUBKEY;
+        let tx = v0_tx(
+            16,
+            static_keys,
+            ix_accounts(16),
+            create_v2_data_with_holder_tail(),
+        );
+        let mut events = Vec::new();
+
+        parse_transaction_dex_events_with_filter(
+            &tx,
+            Signature::default(),
+            123,
+            0,
+            456,
+            None,
+            &mut events,
+        );
+
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            DexEvent::PumpFunCreate(event) => {
+                assert_eq!(event.creator_fee_bps, 250);
+                assert!(event.is_holder_reward);
+            }
+            other => panic!("expected PumpFunCreate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn shred_pumpfun_create_fills_legacy_accounts() {
+        let accounts: Vec<_> = (0..18).map(|_| Pubkey::new_unique()).collect();
+        let mut create_data = discriminators::CREATE.to_vec();
+        str_arg("Parity", &mut create_data);
+        str_arg("PAR", &mut create_data);
+        str_arg("https://example.invalid/parity", &mut create_data);
+        create_data.extend_from_slice(accounts[7].as_ref());
+        let events = aligned_outer_events(PROGRAM_ID_PUBKEY, accounts[..14].to_vec(), create_data);
+        let DexEvent::PumpFunCreate(e) = &events[0] else {
+            panic!("create")
+        };
+        assert_eq!(e.mint_authority, accounts[1]);
+        assert_eq!(e.associated_bonding_curve, accounts[3]);
+        assert_eq!(e.global, accounts[4]);
+        assert_eq!(e.associated_token_program, accounts[10]);
+        assert_eq!(e.event_authority, accounts[12]);
+        assert_eq!(e.program, accounts[13]);
+    }
+
+    fn create_v2_data_with_holder_tail() -> Vec<u8> {
+        let mut data = create_v2_data();
+        data.extend_from_slice(&250u64.to_le_bytes());
+        data.push(1);
+        data
+    }
+
+    fn aligned_outer_events(
+        program: Pubkey,
+        accounts: Vec<Pubkey>,
+        data: Vec<u8>,
+    ) -> Vec<DexEvent> {
+        let count = accounts.len();
+        let mut keys = accounts;
+        keys.push(program);
+        let tx = v0_tx(count as u8, keys, (0..count as u8).collect(), data);
+        let mut events = Vec::new();
+        parse_transaction_dex_events(&tx, Signature::default(), 42, 3, 1234, &mut events);
+        assert_eq!(events.len(), 1);
+        events
     }
 }

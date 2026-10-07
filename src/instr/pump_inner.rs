@@ -452,6 +452,24 @@ fn parse_create_event_fields(data: &[u8], metadata: EventMetadata) -> Option<Dex
     let symbol = read_string(data, &mut offset)?;
     let uri = read_string(data, &mut offset)?;
 
+    if data.len() - offset == 96 {
+        return Some(DexEvent::PumpFunCreate(PumpFunCreateTokenEvent {
+            metadata,
+            name,
+            symbol,
+            uri,
+            mint: read_pubkey(data, offset)?,
+            bonding_curve: read_pubkey(data, offset + 32)?,
+            user: read_pubkey(data, offset + 64)?,
+            ix_name: "create".into(),
+            quote_mint: PUMPFUN_SOLSCAN_SOL_QUOTE_MINT,
+            ..Default::default()
+        }));
+    }
+    if data.len() - offset < 201 {
+        return None;
+    }
+
     let mint = read_pubkey(data, offset)?;
     offset += 32;
     let bonding_curve = read_pubkey(data, offset)?;
@@ -480,6 +498,10 @@ fn parse_create_event_fields(data: &[u8], metadata: EventMetadata) -> Option<Dex
     let quote_mint = normalize_pumpfun_quote_mint(read_pubkey(data, offset).unwrap_or_default());
     offset += 32;
     let virtual_quote_reserves = read_u64_le(data, offset).unwrap_or_default();
+    offset += 8;
+    let creator_fee_bps = read_u64_le(data, offset).unwrap_or_default();
+    offset += 8;
+    let is_holder_reward = data.get(offset).copied().unwrap_or_default() == 1;
 
     Some(DexEvent::PumpFunCreate(PumpFunCreateTokenEvent {
         metadata,
@@ -500,6 +522,8 @@ fn parse_create_event_fields(data: &[u8], metadata: EventMetadata) -> Option<Dex
         is_cashback_enabled,
         quote_mint,
         virtual_quote_reserves,
+        creator_fee_bps,
+        is_holder_reward,
         ix_name: "create".to_string(),
         ..Default::default()
     }))
@@ -523,6 +547,20 @@ fn parse_create_event_inner_zero_copy(data: &[u8], metadata: EventMetadata) -> O
         let (uri, uri_len) = read_str_unchecked(data, offset)?;
         offset += uri_len;
 
+        if data.len() - offset == 96 {
+            return Some(DexEvent::PumpFunCreate(PumpFunCreateTokenEvent {
+                metadata: metadata,
+                name: name.to_string(),
+                symbol: symbol.to_string(),
+                uri: uri.to_string(),
+                mint: read_pubkey_unchecked(data, offset),
+                bonding_curve: read_pubkey_unchecked(data, offset + 32),
+                user: read_pubkey_unchecked(data, offset + 64),
+                ix_name: "create".into(),
+                quote_mint: PUMPFUN_SOLSCAN_SOL_QUOTE_MINT,
+                ..Default::default()
+            }));
+        }
         if data.len() < offset + 32 + 32 + 32 + 32 + 8 + 8 + 8 + 8 + 8 + 32 + 1 {
             return None;
         }
@@ -586,6 +624,18 @@ fn parse_create_event_inner_zero_copy(data: &[u8], metadata: EventMetadata) -> O
         } else {
             0
         };
+        offset += 8;
+        let creator_fee_bps = if offset + 8 <= data.len() {
+            read_u64_unchecked(data, offset)
+        } else {
+            0
+        };
+        offset += 8;
+        let is_holder_reward = if offset < data.len() {
+            read_bool_unchecked(data, offset)
+        } else {
+            false
+        };
 
         Some(DexEvent::PumpFunCreate(PumpFunCreateTokenEvent {
             metadata,
@@ -606,6 +656,8 @@ fn parse_create_event_inner_zero_copy(data: &[u8], metadata: EventMetadata) -> O
             is_cashback_enabled,
             quote_mint,
             virtual_quote_reserves,
+            creator_fee_bps,
+            is_holder_reward,
             ix_name: "create".to_string(),
             ..Default::default()
         }))

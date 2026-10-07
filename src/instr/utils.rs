@@ -175,30 +175,39 @@ pub fn parse_create_v2_tail_fields(
     }
     let creator = read_pubkey(data_after_discriminator, offset)?;
     offset += 32;
-    let is_mayhem_mode = read_bool(data_after_discriminator, offset)?;
+    let is_mayhem_mode = read_option_bool_idl(data_after_discriminator, offset)?;
     offset += 1;
-    let is_cashback_enabled = if offset < data_after_discriminator.len() {
-        read_option_bool_idl(data_after_discriminator, offset).unwrap_or(false)
-    } else {
-        false
-    };
+    let (is_cashback_enabled, _, _) =
+        parse_create_v2_optional_tail(&data_after_discriminator[offset..])?;
     Some((creator, is_mayhem_mode, is_cashback_enabled))
+}
+
+#[inline]
+pub(crate) fn parse_create_v2_optional_tail(tail: &[u8]) -> Option<(bool, u64, bool)> {
+    if tail.is_empty() {
+        return Some((false, 0, false));
+    }
+    let cashback = read_option_bool_idl(tail, 0)?;
+    if tail.len() == 1 {
+        return Some((cashback, 0, false));
+    }
+    let fee = read_u64_le(tail, 1)?;
+    let holder_reward = if tail.len() == 9 {
+        false
+    } else {
+        read_option_bool_idl(tail, 9)?
+    };
+    Some((cashback, fee, holder_reward))
 }
 
 /// Read string with 4-byte length prefix (Borsh format)
 /// Returns (string slice, total bytes consumed including length prefix)
 #[inline]
 pub fn read_str_unchecked(data: &[u8], offset: usize) -> Option<(&str, usize)> {
-    if data.len() < offset + 4 {
-        return None;
-    }
-    let len = u32::from_le_bytes(data[offset..offset + 4].try_into().ok()?) as usize;
-    if data.len() < offset + 4 + len {
-        return None;
-    }
-    let string_bytes = &data[offset + 4..offset + 4 + len];
-    let s = std::str::from_utf8(string_bytes).ok()?;
-    Some((s, 4 + len))
+    let tail = data.get(offset..)?;
+    let len = read_u32_le(tail, 0)? as usize;
+    let bytes = tail.get(4..)?.get(..len)?;
+    Some((std::str::from_utf8(bytes).ok()?, len.checked_add(4)?))
 }
 
 /// 从指令数据中读取u64向量（简化版本）

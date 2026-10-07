@@ -510,15 +510,21 @@ pub struct PumpFunCreateTokenEvent {
     pub is_cashback_enabled: bool,
     /// Quote mint for v2 quote pools (for example USDC).
     pub quote_mint: Pubkey,
-    /// Quote-side vault account appended by PumpFun `create_v2` quote pools.
+    /// Quote-side vault, when available from an authoritative decoded source.
     #[borsh(skip)]
     pub quote_vault: Pubkey,
-    /// Quote-side token program appended by PumpFun `create_v2` quote pools.
+    /// Quote-side token program, when available from an authoritative decoded source.
     #[borsh(skip)]
     pub quote_token_program: Pubkey,
     /// Initial virtual quote reserves. For SOL pools this is the SOL-side reserve;
     /// for USDC pools this is the USDC-side reserve.
     pub virtual_quote_reserves: u64,
+    /// Coin-specific creator fee rate. Zero means the standard fee schedule.
+    #[serde(default)]
+    pub creator_fee_bps: u64,
+    /// Whether creator fees are distributed to holders.
+    #[serde(default)]
+    pub is_holder_reward: bool,
     /// Original PumpFun instruction name: `"create"` or `"create_v2"`.
     #[borsh(skip)]
     pub ix_name: String,
@@ -580,6 +586,10 @@ pub struct PumpFunCreateV2TokenEvent {
     pub quote_token_program: Pubkey,
     #[borsh(skip)]
     pub virtual_quote_reserves: u64,
+    #[serde(default)]
+    pub creator_fee_bps: u64,
+    #[serde(default)]
+    pub is_holder_reward: bool,
     /// Original PumpFun instruction name: `"create"` or `"create_v2"`.
     #[borsh(skip)]
     pub ix_name: String,
