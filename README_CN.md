@@ -85,7 +85,7 @@ git clone https://github.com/0xfnzero/sol-shred-sdk
 
 ```toml
 # 添加到您的 Cargo.toml
-sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.2" }
+sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.3" }
 ```
 
 ### 使用 crates.io
@@ -93,7 +93,7 @@ sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.2" }
 ```toml
 # 添加到您的 Cargo.toml
 [dependencies]
-sol-shred-sdk = "4.0.2"
+sol-shred-sdk = "4.0.3"
 ```
 
 PumpFun create/create_v2 账户布局与 RPC 回归验证：[PUMPFUN_CREATE_LAYOUT.md](docs/PUMPFUN_CREATE_LAYOUT.md)。
@@ -363,3 +363,9 @@ CreatorFeeShare 账户。`cpmm_creator_fee` 提供 PDA 推导、旧收集调用�
 见 [examples 使用说明](examples/README.md)：实时 RPC 拉取、11 笔主网样本离线回放，以及原始指令和 token 余额校验。
 
 See [real RPC examples and validation limits](examples/PUMPSWAP_RPC.md).
+
+## v4.0.3 — Signed transaction and hot-path hardening
+
+Hardens signed shred/FEC replay, rejection recovery, loaded-address and wire boundaries. Aligns DEX instruction/account layouts, compact Pump/PumpSwap events, CPMM creator fees, route attribution and liquidity/reward parsing. Malformed protobuf program keys remain unknown rather than being classified as SystemProgram. Adds signed transaction and offline bank regression fixtures.
+
+Validation includes local CPU benchmarks and offline signed-bank scenarios. Measured hot paths use cached inputs without RPC. Benchmarks do not establish production network or transaction-landing latency. No funded mainnet transactions were broadcast.

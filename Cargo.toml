@@ -1,6 +1,6 @@
 [package]
 name = "sol-shred-sdk"
-version = "4.0.2"
+version = "4.0.3"
 edition = "2021"
 authors = []
 repository = "https://github.com/0xfnzero/sol-shred-sdk"

@@ -88,7 +88,7 @@ Add the dependency to your `Cargo.toml`:
 
 ```toml
 # Add to your Cargo.toml
-sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.2" }
+sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.3" }
 ```
 
 ### Use crates.io
@@ -96,7 +96,7 @@ sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.2" }
 ```toml
 # Add to your Cargo.toml
 [dependencies]
-sol-shred-sdk = "4.0.2"
+sol-shred-sdk = "4.0.3"
 ```
 
 PumpFun create/create_v2 account layout and RPC regression details: [PUMPFUN_CREATE_LAYOUT.md](docs/PUMPFUN_CREATE_LAYOUT.md).
@@ -455,3 +455,9 @@ For a synthetic completing buy, retain TradeEvent **and** PostCompleteBuyEvent a
 Reference: [pump-public-docs](https://github.com/pump-fun/pump-public-docs/tree/8cda1fa30ea658b20909d8aedf002047119388d2). Validation uses offline official IDL fixtures; no live trade is sent by the tests.
 
 See [real RPC examples and validation limits](examples/PUMPSWAP_RPC.md).
+
+## v4.0.3 — Signed transaction and hot-path hardening
+
+Hardens signed shred/FEC replay, rejection recovery, loaded-address and wire boundaries. Aligns DEX instruction/account layouts, compact Pump/PumpSwap events, CPMM creator fees, route attribution and liquidity/reward parsing. Malformed protobuf program keys remain unknown rather than being classified as SystemProgram. Adds signed transaction and offline bank regression fixtures.
+
+Validation includes local CPU benchmarks and offline signed-bank scenarios. Measured hot paths use cached inputs without RPC. Benchmarks do not establish production network or transaction-landing latency. No funded mainnet transactions were broadcast.

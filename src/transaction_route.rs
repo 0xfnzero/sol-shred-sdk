@@ -1399,6 +1399,7 @@ mod review_route_scope_regressions {
                 }
                 let tx = Transaction {
                     message: Some(Message {
+                        account_keys: keys.iter().map(|key| key.to_bytes().to_vec()).collect(),
                         instructions: vec![CompiledInstruction {
                             program_id_index: 21,
                             accounts: (0..21).collect(),
