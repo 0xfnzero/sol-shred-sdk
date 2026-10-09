@@ -12,6 +12,8 @@ use solana_sdk::{pubkey::Pubkey, signature::Signature};
 pub mod discriminators {
     pub const SWAP: [u8; 8] = [248, 198, 158, 145, 225, 117, 135, 200];
     pub const SWAP_V2: [u8; 8] = [43, 4, 237, 11, 26, 201, 30, 98];
+    pub const INCREASE_LIQUIDITY: [u8; 8] = [46, 156, 243, 118, 13, 205, 251, 178];
+    pub const DECREASE_LIQUIDITY: [u8; 8] = [160, 38, 208, 111, 104, 91, 44, 1];
     pub const INCREASE_LIQUIDITY_V2: [u8; 8] = [133, 29, 89, 223, 69, 238, 176, 10];
     pub const DECREASE_LIQUIDITY_V2: [u8; 8] = [58, 127, 188, 62, 79, 82, 196, 96]; // ✅ 修复：使用 V2 discriminator
     pub const CREATE_POOL: [u8; 8] = [233, 146, 209, 142, 207, 104, 64, 188];
@@ -42,9 +44,15 @@ pub fn parse_instruction(
     let data = &instruction_data[8..];
 
     match discriminator {
-        discriminators::SWAP => {
-            parse_swap_instruction(data, accounts, signature, slot, tx_index, block_time_us)
-        }
+        discriminators::SWAP => parse_swap_instruction(
+            data,
+            accounts,
+            signature,
+            slot,
+            tx_index,
+            block_time_us,
+            "swap",
+        ),
         discriminators::SWAP_V2 => {
             parse_swap_v2_instruction(data, accounts, signature, slot, tx_index, block_time_us)
         }
@@ -122,13 +130,14 @@ fn parse_swap_instruction(
     slot: u64,
     tx_index: u64,
     block_time_us: Option<i64>,
+    ix_name: &str,
 ) -> Option<DexEvent> {
     let mut offset = 0;
 
-    let _amount = read_u64_le(data, offset)?;
+    let amount = read_u64_le(data, offset)?;
     offset += 8;
 
-    let _other_amount_threshold = read_u64_le(data, offset)?;
+    let other_amount_threshold = read_u64_le(data, offset)?;
     offset += 8;
 
     let sqrt_price_limit_x64 = read_u128_le(data, offset)?;
@@ -139,7 +148,7 @@ fn parse_swap_instruction(
     let pool = get_account(accounts, 2)?;
     let metadata = create_metadata_simple(signature, slot, tx_index, block_time_us, pool);
 
-    Some(DexEvent::RaydiumClmmSwap(RaydiumClmmSwapEvent {
+    let mut event = RaydiumClmmSwapEvent {
         metadata,
         pool_state: pool,
         sender: get_account(accounts, 0).unwrap_or_default(),
@@ -149,11 +158,24 @@ fn parse_swap_instruction(
         transfer_fee_0: 0,
         amount_1: 0,
         transfer_fee_1: 0,
-        zero_for_one: is_base_input,
-        sqrt_price_x64: sqrt_price_limit_x64,
+        // Quantity mode does not encode swap direction.
+        zero_for_one: false,
+        sqrt_price_x64: 0,
+        ix_name: ix_name.to_string(),
+        amount,
+        other_amount_threshold,
+        sqrt_price_limit_x64,
+        is_base_input,
         liquidity: 0,
         tick: 0,
-    }))
+        ..Default::default()
+    };
+    crate::core::account_fillers::raydium::fill_clmm_swap_accounts_with_count(
+        &mut event,
+        &|i| accounts.get(i).copied().unwrap_or_default(),
+        accounts.len(),
+    );
+    Some(DexEvent::RaydiumClmmSwap(event))
 }
 
 /// 解析 Swap V2 指令（支持 Token2022）
@@ -166,7 +188,15 @@ fn parse_swap_v2_instruction(
     block_time_us: Option<i64>,
 ) -> Option<DexEvent> {
     // SwapV2 与 Swap 参数相同，只是支持 Token2022
-    parse_swap_instruction(data, accounts, signature, slot, tx_index, block_time_us)
+    parse_swap_instruction(
+        data,
+        accounts,
+        signature,
+        slot,
+        tx_index,
+        block_time_us,
+        "swap_v2",
+    )
 }
 
 /// 解析增加流动性 V2 指令
@@ -194,7 +224,8 @@ fn parse_increase_liquidity_v2_instruction(
     Some(DexEvent::RaydiumClmmIncreaseLiquidity(
         RaydiumClmmIncreaseLiquidityEvent {
             metadata,
-            position_nft_mint: get_account(accounts, 1).unwrap_or_default(),
+            // Account 1 is the NFT token account; the mint is absent from this instruction.
+            position_nft_mint: Pubkey::default(),
             liquidity,
             amount_0: 0,
             amount_1: 0,
@@ -233,7 +264,8 @@ fn parse_decrease_liquidity_v2_instruction(
     Some(DexEvent::RaydiumClmmDecreaseLiquidity(
         RaydiumClmmDecreaseLiquidityEvent {
             metadata,
-            position_nft_mint: get_account(accounts, 1).unwrap_or_default(),
+            // Account 1 is the NFT token account; the mint is absent from this instruction.
+            position_nft_mint: Pubkey::default(),
             liquidity,
             decrease_amount_0: 0,
             decrease_amount_1: 0,
@@ -296,6 +328,10 @@ fn parse_create_customizable_pool_instruction(
     tx_index: u64,
     block_time_us: Option<i64>,
 ) -> Option<DexEvent> {
+    // Official CreateCustomizableParams: u128 price, CollectFeeOn enum, bool.
+    if data.len() != 18 || accounts.len() < 13 || data[16] > 2 || data[17] > 1 {
+        return None;
+    }
     let sqrt_price_x64 = read_u128_le(data, 0)?;
     let pool = get_account(accounts, 2)?;
     let metadata = create_metadata_simple(signature, slot, tx_index, block_time_us, pool);
@@ -409,4 +445,74 @@ fn parse_open_position_with_token_22_nft_instruction(
     block_time_us: Option<i64>,
 ) -> Option<DexEvent> {
     parse_open_position_instruction(data, accounts, signature, slot, tx_index, block_time_us, 4)
+}
+
+#[cfg(test)]
+mod swap_wire_tests {
+    use super::*;
+
+    #[test]
+    fn swap_limits_and_mode_are_separate_from_execution_and_layout_uses_discriminator() {
+        for v2 in [false, true] {
+            for input_mode in [false, true] {
+                let mut accounts: Vec<_> = (0..17).map(|_| Pubkey::new_unique()).collect();
+                // Deliberately invert the memo heuristic: layout follows discriminator.
+                if !v2 {
+                    accounts[10] = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"
+                        .parse()
+                        .unwrap();
+                }
+                let mut data = Vec::from(if v2 {
+                    discriminators::SWAP_V2
+                } else {
+                    discriminators::SWAP
+                });
+                data.extend_from_slice(&0u64.to_le_bytes());
+                data.extend_from_slice(&u64::MAX.to_le_bytes());
+                data.extend_from_slice(&u128::MAX.to_le_bytes());
+                data.push(u8::from(input_mode));
+                let DexEvent::RaydiumClmmSwap(e) =
+                    parse_instruction(&data, &accounts, Signature::default(), 1, 0, None).unwrap()
+                else {
+                    panic!("swap")
+                };
+                assert_eq!(e.ix_name, if v2 { "swap_v2" } else { "swap" });
+                assert_eq!(e.amount, 0);
+                assert_eq!(e.other_amount_threshold, u64::MAX);
+                assert_eq!(e.sqrt_price_limit_x64, u128::MAX);
+                assert_eq!(e.is_base_input, input_mode);
+                assert_eq!((e.amount_0, e.amount_1, e.sqrt_price_x64), (0, 0, 0));
+                assert!(!e.zero_for_one);
+                assert_eq!(e.tick_arrays, accounts[if v2 { 13 } else { 9 }..].to_vec());
+                assert_eq!(
+                    e.input_mint,
+                    if v2 { accounts[11] } else { Pubkey::default() }
+                );
+                assert_eq!(
+                    e.output_mint,
+                    if v2 { accounts[12] } else { Pubkey::default() }
+                );
+                let serialized = serde_json::to_string(&e).unwrap();
+                let roundtrip: RaydiumClmmSwapEvent = serde_json::from_str(&serialized).unwrap();
+                assert_eq!(roundtrip.sqrt_price_limit_x64, u128::MAX);
+                // Value's default numeric representation is limited to u64;
+                // legacy JSON omits the new limit field entirely.
+                let mut legacy_event = e.clone();
+                legacy_event.sqrt_price_limit_x64 = 0;
+                let mut old_json = serde_json::to_value(&legacy_event).unwrap();
+                for name in [
+                    "ix_name",
+                    "amount",
+                    "other_amount_threshold",
+                    "sqrt_price_limit_x64",
+                    "is_base_input",
+                ] {
+                    old_json.as_object_mut().unwrap().remove(name);
+                }
+                let old: RaydiumClmmSwapEvent = serde_json::from_value(old_json).unwrap();
+                assert!(old.ix_name.is_empty());
+                assert_eq!(old.sqrt_price_limit_x64, 0);
+            }
+        }
+    }
 }

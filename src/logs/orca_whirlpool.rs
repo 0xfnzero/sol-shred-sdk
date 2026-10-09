@@ -127,6 +127,7 @@ pub fn parse_traded_from_data(data: &[u8], metadata: EventMetadata) -> Option<De
         output_transfer_fee,
         lp_fee,
         protocol_fee,
+        ..Default::default()
     }))
 }
 
@@ -360,6 +361,7 @@ fn parse_traded_event(
         // tick_array_0: solana_sdk::pubkey::Pubkey::default(),
         // tick_array_1: solana_sdk::pubkey::Pubkey::default(),
         // tick_array_2: solana_sdk::pubkey::Pubkey::default(),
+        ..Default::default()
     }))
 }
 

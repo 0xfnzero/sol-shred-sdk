@@ -1,0 +1,67 @@
+[
+  {
+    "file": "3MVawF6EPtG7rEPXdsyQfQUBLv3epRVNpNS4tRE4uwTPMqLNPqhuABwxU3QZH4uD6CuVupcpGchpNRK5HTbHRLNK.json",
+    "signature": "3MVawF6EPtG7rEPXdsyQfQUBLv3epRVNpNS4tRE4uwTPMqLNPqhuABwxU3QZH4uD6CuVupcpGchpNRK5HTbHRLNK",
+    "slot": 426008840,
+    "rpc": "https://api.mainnet-beta.solana.com",
+    "fetched_on": "2026-10-07",
+    "sha256": "4736e8835c3029dbcaf0d3711df2918b4a1a58c9cfb07c2ef2cdc378ec57d535",
+    "successful": true,
+    "create_log_fields": {
+      "name": "GREEN SHOE CULT",
+      "symbol": "GSC",
+      "uri": "https://ipfs.io/ipfs/bafkreihzq5op4gyfaayexz2t44fm7whiuix7f43t57wbsiobvwunpkzety",
+      "mint": "FUsqvH5x8QUrxmJhspt6meQZtfBr17m2YsTFuVsYpump",
+      "bonding_curve": "2uqtaJK2Nx8E6oc9U3LeEgKPQkMxtoeVztnA3JQFTmQx",
+      "user": "9Gg6Mf8tq9zLSpK8qccrQiue3iE7wmyeogKkGZpnz2w5",
+      "creator": "9Gg6Mf8tq9zLSpK8qccrQiue3iE7wmyeogKkGZpnz2w5",
+      "timestamp": 1781278270,
+      "virtual_token_reserves": 1073000000000000,
+      "virtual_sol_reserves": 4292000000,
+      "real_token_reserves": 793100000000000,
+      "token_total_supply": 1000000000000000,
+      "token_program": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      "is_mayhem_mode": false,
+      "is_cashback_enabled": true,
+      "quote_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+      "virtual_quote_reserves": 4292000000
+    }
+  },
+  {
+    "file": "4GCVgY2FnT1s4q5zemnPL4mzSbuhUTgQo9mc9jewhLZzsCXKe8ehz6xD4QDJE853CLrF6doJbf4JNwJVeEYLA4De.json",
+    "signature": "4GCVgY2FnT1s4q5zemnPL4mzSbuhUTgQo9mc9jewhLZzsCXKe8ehz6xD4QDJE853CLrF6doJbf4JNwJVeEYLA4De",
+    "slot": 425973593,
+    "rpc": "https://api.mainnet-beta.solana.com",
+    "fetched_on": "2026-10-07",
+    "sha256": "41b555c5803a1fa4940dc80dfa7a84a6034ff9ea346845e341d43931c0cb0572",
+    "successful": true,
+    "create_log_fields": {
+      "name": "The Chad",
+      "symbol": "CHAD",
+      "uri": "https://meta.uxento.io/data/05e67b98-14af-48fa-ad87-baa15a29845a",
+      "mint": "CGY36MoFU627gPH4TLM5NP4Xnvhz6Nesc71TQecPpump",
+      "bonding_curve": "EK57sBdtnx5aqtUcdYDsawy6rV23RQKHByNz7vTMzFpn",
+      "user": "Aqje5DsN4u2PHmQxGF9PKfpsDGwQRCBhWeLKHCFhSMXk",
+      "creator": "Aqje5DsN4u2PHmQxGF9PKfpsDGwQRCBhWeLKHCFhSMXk",
+      "timestamp": 1781264277,
+      "virtual_token_reserves": 1073000000000000,
+      "virtual_sol_reserves": 30000000000,
+      "real_token_reserves": 793100000000000,
+      "token_total_supply": 1000000000000000,
+      "token_program": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      "is_mayhem_mode": false,
+      "is_cashback_enabled": true,
+      "quote_mint": "11111111111111111111111111111111",
+      "virtual_quote_reserves": 30000000000
+    }
+  },
+  {
+    "file": "oY9YQbie16Bw11GsqbAPVnW6YjMHAj3kP9sufjcuQjdfcU86iUY8CiSaDrvu4QXJFnGY4jqQc2Kc1YVuAzujvyv.json",
+    "signature": "oY9YQbie16Bw11GsqbAPVnW6YjMHAj3kP9sufjcuQjdfcU86iUY8CiSaDrvu4QXJFnGY4jqQc2Kc1YVuAzujvyv",
+    "slot": 426008789,
+    "rpc": "https://api.mainnet-beta.solana.com",
+    "fetched_on": "2026-10-07",
+    "sha256": "be5582ac46cb0e40cb638265c94f685d3424d09f1d2d8fb325e85441ddf546bc",
+    "successful": false
+  }
+]

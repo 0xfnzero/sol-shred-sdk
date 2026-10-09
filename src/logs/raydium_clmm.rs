@@ -245,6 +245,7 @@ fn parse_swap_event(
         sqrt_price_x64,
         liquidity,
         tick,
+        ..Default::default()
     }))
 }
 
@@ -833,11 +834,7 @@ fn parse_swap_from_text(
         // is_base_input,
         liquidity: 0,
         tick: 0,
-        // 暂时注释，以后会用，AI禁止改动
-        // 指令参数字段
-        // amount: extract_number_from_text(log, "amount").unwrap_or(1_000_000_000),
-        // other_amount_threshold: extract_number_from_text(log, "threshold").unwrap_or(950_000_000),
-        // sqrt_price_limit_x64: 0,
+        ..Default::default()
     }))
 }
 
@@ -1048,6 +1045,7 @@ pub fn parse_swap_from_data(data: &[u8], metadata: EventMetadata) -> Option<DexE
         sqrt_price_x64,
         liquidity,
         tick,
+        ..Default::default()
     }))
 }
 

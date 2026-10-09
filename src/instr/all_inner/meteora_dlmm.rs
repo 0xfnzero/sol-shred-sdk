@@ -141,39 +141,7 @@ fn parse_swap(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
 
 #[inline(always)]
 fn parse_swap2(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
-    unsafe {
-        if !check_length(
-            data,
-            32 + 32 + 4 + 4 + 1 + 16 + 8 + 8 + 8 + 8 + 8 + 8 + 8 + 1 + 1,
-        ) {
-            return None;
-        }
-        let pool = read_pubkey_unchecked(data, 0);
-        let from = read_pubkey_unchecked(data, 32);
-        let start_bin_id = read_i32_unchecked(data, 64);
-        let end_bin_id = read_i32_unchecked(data, 68);
-        let swap_for_y = read_bool_unchecked(data, 72);
-        let fee_bps = read_u128_unchecked(data, 73);
-        let amount_in = read_u64_unchecked(data, 89);
-        let amount_out = read_u64_unchecked(data, 105);
-        let fee = read_u64_unchecked(data, 113);
-        let protocol_fee = read_u64_unchecked(data, 121);
-        let host_fee = read_u64_unchecked(data, 137);
-        Some(DexEvent::MeteoraDlmmSwap(MeteoraDlmmSwapEvent {
-            metadata,
-            pool,
-            from,
-            start_bin_id,
-            end_bin_id,
-            amount_in,
-            amount_out,
-            swap_for_y,
-            fee,
-            protocol_fee,
-            fee_bps,
-            host_fee,
-        }))
-    }
+    crate::logs::meteora_dlmm::parse_swap2_from_data(data, metadata)
 }
 
 #[inline(always)]
@@ -231,6 +199,7 @@ fn parse_swap_zero_copy(data: &[u8], metadata: EventMetadata) -> Option<DexEvent
             protocol_fee,
             fee_bps,
             host_fee,
+            ..Default::default()
         }))
     }
 }
@@ -503,7 +472,9 @@ mod tests {
         };
         assert_eq!(event.amount_in, 100);
         assert_eq!(event.amount_out, 90);
-        assert_eq!(event.fee, 3);
+        assert_eq!(event.fee, 5);
+        assert_eq!(event.mm_fee, 3);
+        assert_eq!(event.event_version, 2);
     }
 
     #[test]

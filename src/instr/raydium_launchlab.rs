@@ -101,9 +101,37 @@ pub fn parse_instruction(
             block_time_us,
             (10, 11),
         ),
-        // The LaunchLab IDL does not expose enough fields to synthesize a
-        // migration event with the SDK's migrate layout.
-        discriminators::MIGRATE_TO_AMM | discriminators::MIGRATE_TO_CPSWAP => None,
+        discriminators::MIGRATE_TO_AMM | discriminators::MIGRATE_TO_CPSWAP => {
+            let cp = discriminator == discriminators::MIGRATE_TO_CPSWAP;
+            if accounts.len() < if cp { 28 } else { 32 } || (!cp && data.len() < 17) {
+                return None;
+            }
+            let old_pool = get_account(accounts, if cp { 17 } else { 23 })?;
+            Some(DexEvent::RaydiumLaunchlabMigrateAmm(
+                RaydiumLaunchlabMigrateAmmEvent {
+                    metadata: create_metadata_simple(
+                        signature,
+                        slot,
+                        tx_index,
+                        block_time_us,
+                        old_pool,
+                    ),
+                    old_pool,
+                    new_pool: get_account(accounts, if cp { 5 } else { 13 })?,
+                    user: get_account(accounts, 0)?,
+                    liquidity_amount: 0,
+                    liquidity_amount_known: false,
+                    base_mint: get_account(accounts, 1)?,
+                    quote_mint: get_account(accounts, 2)?,
+                    platform_config: if cp {
+                        get_account(accounts, 3)?
+                    } else {
+                        Pubkey::default()
+                    },
+                    destination_program: get_account(accounts, if cp { 4 } else { 12 })?,
+                },
+            ))
+        }
         _ => None,
     }
 }
@@ -141,11 +169,23 @@ fn parse_trade_instruction(
             amount_in,
             amount_out,
             is_buy,
+            total_base_sell: 0,
+            virtual_base: 0,
+            virtual_quote: 0,
+            real_base_before: 0,
+            real_quote_before: 0,
+            real_base_after: 0,
+            real_quote_after: 0,
+            protocol_fee: 0,
+            platform_fee: 0,
+            creator_fee: 0,
+            share_fee: 0,
             trade_direction: if is_buy {
                 TradeDirection::Buy
             } else {
                 TradeDirection::Sell
             },
+            pool_status: RaydiumLaunchlabPoolStatus::Fund,
             exact_in,
             global_config: get_account(accounts, 2).unwrap_or_default(),
             platform_config: get_account(accounts, 3).unwrap_or_default(),
@@ -157,6 +197,9 @@ fn parse_trade_instruction(
             quote_mint: get_account(accounts, 10).unwrap_or_default(),
             base_token_program: get_account(accounts, 11).unwrap_or_default(),
             quote_token_program: get_account(accounts, 12).unwrap_or_default(),
+            system_program: get_account(accounts, 15).unwrap_or_default(),
+            platform_associated_account: get_account(accounts, 16).unwrap_or_default(),
+            creator_associated_account: get_account(accounts, 17).unwrap_or_default(),
         },
     ))
 }
@@ -249,7 +292,7 @@ mod tests {
 
     #[test]
     fn trade_instruction_exposes_current_idl_account_context() {
-        let accounts: Vec<_> = (0..15).map(|_| Pubkey::new_unique()).collect();
+        let accounts: Vec<_> = (0..18).map(|_| Pubkey::new_unique()).collect();
 
         for discriminator in [
             discriminators::BUY_EXACT_IN,
@@ -274,6 +317,9 @@ mod tests {
             assert_eq!(event.global_config, accounts[2]);
             assert_eq!(event.platform_config, accounts[3]);
             assert_eq!(event.pool_state, accounts[4]);
+            assert_eq!(event.system_program, accounts[15]);
+            assert_eq!(event.platform_associated_account, accounts[16]);
+            assert_eq!(event.creator_associated_account, accounts[17]);
             assert_eq!(event.user_base_token, accounts[5]);
             assert_eq!(event.user_quote_token, accounts[6]);
             assert_eq!(event.base_vault, accounts[7]);
@@ -307,11 +353,70 @@ mod tests {
             };
 
             assert_eq!(event.payer, accounts[0]);
+            assert_eq!(event.creator, accounts[1]);
+            assert_eq!(event.global_config, accounts[2]);
+            assert_eq!(event.platform_config, accounts[3]);
             assert_eq!(event.pool_state, accounts[5]);
+            assert_eq!(event.base_mint, accounts[6]);
             assert_eq!(event.quote_mint, accounts[7]);
+            assert_eq!(event.base_vault, accounts[8]);
+            assert_eq!(event.quote_vault, accounts[9]);
             assert_eq!(event.base_token_program, accounts[token_program_indices.0]);
             assert_eq!(event.quote_token_program, accounts[token_program_indices.1]);
         }
+    }
+
+    #[test]
+    fn trade_instruction_identifies_stonkfun_reward_platform() {
+        let mut accounts: Vec<_> = (0..18).map(|_| Pubkey::new_unique()).collect();
+        accounts[3] = STONKFUN_REWARD_PLATFORM_CONFIG;
+
+        let DexEvent::RaydiumLaunchlabTrade(event) = parse_instruction(
+            &trade_data(discriminators::BUY_EXACT_IN),
+            &accounts,
+            Signature::default(),
+            1,
+            2,
+            Some(3),
+        )
+        .expect("trade") else {
+            panic!("LaunchLab trade")
+        };
+
+        assert!(event.is_stonkfun());
+        assert_eq!(event.stonkfun_mode(), Some(StonkFunMode::Reward));
+    }
+
+    #[test]
+    fn migrate_to_cpswap_exposes_stonkfun_platform_and_destination() {
+        let mut accounts: Vec<_> = (0..28).map(|_| Pubkey::new_unique()).collect();
+        accounts[3] = STONKFUN_STANDARD_PLATFORM_CONFIG;
+        accounts[4] = program_ids::RAYDIUM_CPMM_PROGRAM_ID;
+
+        let DexEvent::RaydiumLaunchlabMigrateAmm(event) = parse_instruction(
+            &discriminators::MIGRATE_TO_CPSWAP,
+            &accounts,
+            Signature::default(),
+            1,
+            2,
+            Some(3),
+        )
+        .expect("migrate") else {
+            panic!("LaunchLab migrate")
+        };
+
+        assert_eq!(event.user, accounts[0]);
+        assert_eq!(event.base_mint, accounts[1]);
+        assert_eq!(event.quote_mint, accounts[2]);
+        assert_eq!(event.platform_config, STONKFUN_STANDARD_PLATFORM_CONFIG);
+        assert_eq!(
+            event.destination_program,
+            program_ids::RAYDIUM_CPMM_PROGRAM_ID
+        );
+        assert_eq!(event.new_pool, accounts[5]);
+        assert_eq!(event.old_pool, accounts[17]);
+        assert!(!event.liquidity_amount_known);
+        assert_eq!(event.stonkfun_mode(), Some(StonkFunMode::Standard));
     }
 
     #[test]

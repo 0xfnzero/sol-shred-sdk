@@ -122,7 +122,17 @@ pub unsafe fn read_u16_unchecked(data: &[u8], offset: usize) -> u16 {
 }
 
 const MAX_TRADE_SHAREHOLDERS: usize = 64;
-type TradeEventExtensions = (u64, u64, Vec<PumpFeesShareholder>, Pubkey, u64, u64, u64);
+type TradeEventExtensions = (
+    u64,
+    u64,
+    Vec<PumpFeesShareholder>,
+    Pubkey,
+    u64,
+    u64,
+    u64,
+    u64,
+    u64,
+);
 
 #[inline(always)]
 unsafe fn read_optional_u64(data: &[u8], offset: &mut usize) -> u64 {
@@ -186,6 +196,8 @@ pub(crate) unsafe fn read_trade_event_extensions(
     let quote_amount = read_optional_u64(data, offset);
     let virtual_quote_reserves = read_optional_u64(data, offset);
     let real_quote_reserves = read_optional_u64(data, offset);
+    let holder_rewards_bps = read_optional_u64(data, offset);
+    let holder_rewards = read_optional_u64(data, offset);
     Some((
         buyback_fee_basis_points,
         buyback_fee,
@@ -194,6 +206,8 @@ pub(crate) unsafe fn read_trade_event_extensions(
         quote_amount,
         virtual_quote_reserves,
         real_quote_reserves,
+        holder_rewards_bps,
+        holder_rewards,
     ))
 }
 
@@ -334,6 +348,16 @@ pub fn parse_log(
     result
 }
 
+/// Validate complete historical CreateEvent layouts after the three Borsh strings.
+/// Optional IDL fields may be absent, but partially present scalars are invalid.
+#[inline(always)]
+pub(crate) fn valid_create_event_body(body: &[u8]) -> bool {
+    matches!(body.len(), 96 | 201 | 202 | 234 | 242 | 250 | 251 | 252)
+        && [200, 201, 250]
+            .into_iter()
+            .all(|offset| body.get(offset).is_none_or(|value| *value <= 1))
+}
+
 /// 解析 CreateEvent (极限优化)
 ///
 /// 优化:
@@ -362,7 +386,32 @@ fn parse_create_event_optimized(
         let (uri, uri_len) = read_str_unchecked(data, offset)?;
         offset += uri_len;
 
+        if !valid_create_event_body(&data[offset..]) {
+            return None;
+        }
+
         // 快速边界检查
+        if data.len() - offset == 96 {
+            return Some(DexEvent::PumpFunCreate(PumpFunCreateTokenEvent {
+                metadata: EventMetadata {
+                    signature,
+                    slot,
+                    tx_index,
+                    block_time_us: block_time_us.unwrap_or(0),
+                    grpc_recv_us,
+                    recent_blockhash: None,
+                },
+                name: name.to_string(),
+                symbol: symbol.to_string(),
+                uri: uri.to_string(),
+                mint: read_pubkey_unchecked(data, offset),
+                bonding_curve: read_pubkey_unchecked(data, offset + 32),
+                user: read_pubkey_unchecked(data, offset + 64),
+                ix_name: "create".into(),
+                quote_mint: PUMPFUN_SOLSCAN_SOL_QUOTE_MINT,
+                ..Default::default()
+            }));
+        }
         if data.len() < offset + 32 + 32 + 32 + 32 + 8 + 8 + 8 + 8 + 8 + 32 + 1 {
             return None;
         }
@@ -426,6 +475,18 @@ fn parse_create_event_optimized(
         } else {
             0
         };
+        offset += 8;
+        let creator_fee_bps = if offset + 8 <= data.len() {
+            read_u64_unchecked(data, offset)
+        } else {
+            0
+        };
+        offset += 8;
+        let is_holder_reward = if offset < data.len() {
+            read_bool_unchecked(data, offset)
+        } else {
+            false
+        };
 
         let metadata = EventMetadata {
             signature,
@@ -457,6 +518,9 @@ fn parse_create_event_optimized(
             is_cashback_enabled,
             quote_mint,
             virtual_quote_reserves,
+            creator_fee_bps,
+            is_holder_reward,
+            depth: data.get(offset + 1).copied().unwrap_or(0),
             ix_name: "create".to_string(),
             ..Default::default()
         }))
@@ -614,6 +678,8 @@ fn parse_trade_event_optimized(
             quote_amount,
             virtual_quote_reserves,
             real_quote_reserves,
+            holder_rewards_bps,
+            holder_rewards,
         ) = read_trade_event_extensions(data, &mut offset)?;
 
         let metadata = EventMetadata {
@@ -626,6 +692,7 @@ fn parse_trade_event_optimized(
         };
 
         let trade_event = PumpFunTradeEvent {
+            creator_fee_unclaimed: read_optional_u64(data, &mut offset),
             metadata,
             mint,
             sol_amount,
@@ -660,6 +727,8 @@ fn parse_trade_event_optimized(
             quote_amount,
             virtual_quote_reserves,
             real_quote_reserves,
+            holder_rewards_bps,
+            holder_rewards,
             is_cashback_coin: cashback_fee_basis_points > 0,
             amount: 0,
             max_sol_cost: 0,
@@ -686,10 +755,12 @@ fn parse_trade_event_optimized(
 
         // 根据 ix_name 返回不同的事件类型，支持用户过滤特定交易类型
         match ix_kind {
-            "buy" => Some(DexEvent::PumpFunBuy(trade_event)),
-            "sell" => Some(DexEvent::PumpFunSell(trade_event)),
+            "buy" | "buy_v3" => Some(DexEvent::PumpFunBuy(trade_event)),
+            "sell" | "sell_v3" => Some(DexEvent::PumpFunSell(trade_event)),
             "buy_exact_sol_in" => Some(DexEvent::PumpFunBuyExactSolIn(trade_event)),
-            "buy_exact_quote_in" => Some(DexEvent::PumpFunBuy(trade_event)),
+            "buy_exact_quote_in" | "buy_exact_quote_in_v3" => {
+                Some(DexEvent::PumpFunBuy(trade_event))
+            }
             _ => Some(DexEvent::PumpFunTrade(trade_event)), // 兼容旧版本或未知类型
         }
     }
@@ -969,9 +1040,12 @@ pub fn parse_trade_from_data(
             quote_amount,
             virtual_quote_reserves,
             real_quote_reserves,
+            holder_rewards_bps,
+            holder_rewards,
         ) = read_trade_event_extensions(data, &mut offset)?;
 
         let trade_event = PumpFunTradeEvent {
+            creator_fee_unclaimed: read_optional_u64(data, &mut offset),
             metadata,
             mint,
             sol_amount,
@@ -1006,6 +1080,8 @@ pub fn parse_trade_from_data(
             quote_amount,
             virtual_quote_reserves,
             real_quote_reserves,
+            holder_rewards_bps,
+            holder_rewards,
             is_cashback_coin: cashback_fee_basis_points > 0,
             amount: 0,
             max_sol_cost: 0,
@@ -1032,10 +1108,12 @@ pub fn parse_trade_from_data(
 
         // 根据 ix_name 返回不同的事件类型
         match ix_kind {
-            "buy" => Some(DexEvent::PumpFunBuy(trade_event)),
-            "sell" => Some(DexEvent::PumpFunSell(trade_event)),
+            "buy" | "buy_v3" => Some(DexEvent::PumpFunBuy(trade_event)),
+            "sell" | "sell_v3" => Some(DexEvent::PumpFunSell(trade_event)),
             "buy_exact_sol_in" => Some(DexEvent::PumpFunBuyExactSolIn(trade_event)),
-            "buy_exact_quote_in" => Some(DexEvent::PumpFunBuy(trade_event)),
+            "buy_exact_quote_in" | "buy_exact_quote_in_v3" => {
+                Some(DexEvent::PumpFunBuy(trade_event))
+            }
             _ => Some(DexEvent::PumpFunTrade(trade_event)),
         }
     }
@@ -1104,6 +1182,24 @@ pub fn parse_create_from_data(data: &[u8], metadata: EventMetadata) -> Option<De
         let (uri, uri_len) = read_str_unchecked(data, offset)?;
         offset += uri_len;
 
+        if !valid_create_event_body(&data[offset..]) {
+            return None;
+        }
+
+        if data.len() - offset == 96 {
+            return Some(DexEvent::PumpFunCreate(PumpFunCreateTokenEvent {
+                metadata,
+                name: name.to_string(),
+                symbol: symbol.to_string(),
+                uri: uri.to_string(),
+                mint: read_pubkey_unchecked(data, offset),
+                bonding_curve: read_pubkey_unchecked(data, offset + 32),
+                user: read_pubkey_unchecked(data, offset + 64),
+                ix_name: "create".into(),
+                quote_mint: PUMPFUN_SOLSCAN_SOL_QUOTE_MINT,
+                ..Default::default()
+            }));
+        }
         if data.len() < offset + 32 + 32 + 32 + 32 + 8 + 8 + 8 + 8 + 8 + 32 + 1 {
             return None;
         }
@@ -1165,6 +1261,18 @@ pub fn parse_create_from_data(data: &[u8], metadata: EventMetadata) -> Option<De
         } else {
             0
         };
+        offset += 8;
+        let creator_fee_bps = if offset + 8 <= data.len() {
+            read_u64_unchecked(data, offset)
+        } else {
+            0
+        };
+        offset += 8;
+        let is_holder_reward = if offset < data.len() {
+            read_bool_unchecked(data, offset)
+        } else {
+            false
+        };
 
         Some(DexEvent::PumpFunCreate(PumpFunCreateTokenEvent {
             metadata,
@@ -1185,6 +1293,9 @@ pub fn parse_create_from_data(data: &[u8], metadata: EventMetadata) -> Option<De
             is_cashback_enabled,
             quote_mint,
             virtual_quote_reserves,
+            creator_fee_bps,
+            is_holder_reward,
+            depth: data.get(offset + 1).copied().unwrap_or(0),
             ix_name: "create".to_string(),
             ..Default::default()
         }))

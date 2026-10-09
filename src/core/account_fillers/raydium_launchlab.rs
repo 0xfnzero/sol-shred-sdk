@@ -47,6 +47,15 @@ pub fn fill_trade_accounts(e: &mut RaydiumLaunchlabTradeEvent, get: &AccountGett
     if e.quote_token_program == Pubkey::default() {
         e.quote_token_program = get(12);
     }
+    if e.system_program == Pubkey::default() {
+        e.system_program = get(15);
+    }
+    if e.platform_associated_account == Pubkey::default() {
+        e.platform_associated_account = get(16);
+    }
+    if e.creator_associated_account == Pubkey::default() {
+        e.creator_associated_account = get(17);
+    }
 }
 
 /// Fills account context for a Raydium LaunchLab pool-create event.
@@ -95,5 +104,59 @@ pub fn fill_pool_create_accounts(e: &mut RaydiumLaunchlabPoolCreateEvent, get: &
     }
     if e.quote_token_program == Pubkey::default() {
         e.quote_token_program = get(token_program_indices.1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn event() -> RaydiumLaunchlabPoolCreateEvent {
+        RaydiumLaunchlabPoolCreateEvent {
+            metadata: EventMetadata::default(),
+            base_mint_param: BaseMintParam {
+                symbol: String::new(),
+                name: String::new(),
+                uri: String::new(),
+                decimals: 0,
+            },
+            pool_state: Pubkey::default(),
+            payer: Pubkey::default(),
+            creator: Pubkey::default(),
+            global_config: Pubkey::default(),
+            platform_config: Pubkey::default(),
+            base_mint: Pubkey::default(),
+            quote_mint: Pubkey::default(),
+            base_vault: Pubkey::default(),
+            quote_vault: Pubkey::default(),
+            base_token_program: Pubkey::default(),
+            quote_token_program: Pubkey::default(),
+        }
+    }
+
+    #[test]
+    fn pool_create_filler_handles_standard_initialize_layout() {
+        let mut accounts: Vec<_> = (0..18).map(|_| Pubkey::new_unique()).collect();
+        accounts[17] = crate::instr::raydium_launchlab::PROGRAM_ID_PUBKEY;
+        let get = |index: usize| accounts.get(index).copied().unwrap_or_default();
+        let mut event = event();
+
+        fill_pool_create_accounts(&mut event, &get);
+
+        assert_eq!(event.base_token_program, accounts[11]);
+        assert_eq!(event.quote_token_program, accounts[12]);
+    }
+
+    #[test]
+    fn pool_create_filler_handles_token_2022_initialize_layout() {
+        let mut accounts: Vec<_> = (0..15).map(|_| Pubkey::new_unique()).collect();
+        accounts[14] = crate::instr::raydium_launchlab::PROGRAM_ID_PUBKEY;
+        let get = |index: usize| accounts.get(index).copied().unwrap_or_default();
+        let mut event = event();
+
+        fill_pool_create_accounts(&mut event, &get);
+
+        assert_eq!(event.base_token_program, accounts[10]);
+        assert_eq!(event.quote_token_program, accounts[11]);
     }
 }

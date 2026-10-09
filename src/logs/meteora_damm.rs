@@ -601,7 +601,27 @@ fn parse_close_position_event(
     parse_close_position_from_data(data, metadata)
 }
 
-/// 解析 Claim Position Fee 事件
+/// Decode the exact official `EvtClaimPositionFee` body, shared by log and CPI paths.
+#[inline(always)]
+pub fn parse_claim_position_fee_from_data(
+    data: &[u8],
+    metadata: EventMetadata,
+) -> Option<DexEvent> {
+    if data.len() != 112 {
+        return None;
+    }
+    Some(DexEvent::MeteoraDammV2ClaimPositionFee(
+        MeteoraDammV2ClaimPositionFeeEvent {
+            metadata,
+            pool: read_pubkey(data, 0)?,
+            position: read_pubkey(data, 32)?,
+            owner: read_pubkey(data, 64)?,
+            fee_a_claimed: read_u64_le(data, 96)?,
+            fee_b_claimed: read_u64_le(data, 104)?,
+        },
+    ))
+}
+
 fn parse_claim_position_fee_event(
     data: &[u8],
     signature: Signature,
@@ -610,37 +630,31 @@ fn parse_claim_position_fee_event(
     block_time_us: Option<i64>,
     grpc_recv_us: i64,
 ) -> Option<DexEvent> {
-    // let mut offset = 0;
-
-    // let lb_pair = read_pubkey(data, offset)?;
-    // offset += 32;
-
-    // let position = read_pubkey(data, offset)?;
-    // offset += 32;
-
-    // let owner = read_pubkey(data, offset)?;
-    // offset += 32;
-
-    // let fee_x = read_u64_le(data, offset)?;
-    // offset += 8;
-
-    // let fee_y = read_u64_le(data, offset)?;
-
-    // let metadata =
-    //     create_metadata_simple(signature, slot, tx_index, block_time_us, lb_pair, grpc_recv_us);
-
-    // Some(DexEvent::MeteoraDammV2ClaimPositionFee(MeteoraDammV2ClaimPositionFeeEvent {
-    //     metadata,
-    //     lb_pair,
-    //     position,
-    //     owner,
-    //     fee_x,
-    //     fee_y,
-    // }))
-    None
+    let pool = read_pubkey(data, 0)?;
+    let metadata =
+        create_metadata_simple(signature, slot, tx_index, block_time_us, pool, grpc_recv_us);
+    parse_claim_position_fee_from_data(data, metadata)
 }
 
-/// 解析 Initialize Reward 事件
+/// Decode the exact official `EvtInitializeReward` body, shared by log and CPI paths.
+#[inline(always)]
+pub fn parse_initialize_reward_from_data(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
+    if data.len() != 137 {
+        return None;
+    }
+    Some(DexEvent::MeteoraDammV2InitializeReward(
+        MeteoraDammV2InitializeRewardEvent {
+            metadata,
+            pool: read_pubkey(data, 0)?,
+            reward_mint: read_pubkey(data, 32)?,
+            funder: read_pubkey(data, 64)?,
+            creator: read_pubkey(data, 96)?,
+            reward_index: *data.get(128)?,
+            reward_duration: read_u64_le(data, 129)?,
+        },
+    ))
+}
+
 fn parse_initialize_reward_event(
     data: &[u8],
     signature: Signature,
@@ -649,37 +663,34 @@ fn parse_initialize_reward_event(
     block_time_us: Option<i64>,
     grpc_recv_us: i64,
 ) -> Option<DexEvent> {
-    // let mut offset = 0;
-
-    // let lb_pair = read_pubkey(data, offset)?;
-    // offset += 32;
-
-    // let reward_mint = read_pubkey(data, offset)?;
-    // offset += 32;
-
-    // let funder = read_pubkey(data, offset)?;
-    // offset += 32;
-
-    // let reward_index = read_u64_le(data, offset)?;
-    // offset += 8;
-
-    // let reward_duration = read_u64_le(data, offset)?;
-
-    // let metadata =
-    //     create_metadata_simple(signature, slot, tx_index, block_time_us, lb_pair, grpc_recv_us);
-
-    // Some(DexEvent::MeteoraDammV2InitializeReward(MeteoraDammV2InitializeRewardEvent {
-    //     metadata,
-    //     lb_pair,
-    //     reward_mint,
-    //     funder,
-    //     reward_index,
-    //     reward_duration,
-    // }))
-    None
+    let pool = read_pubkey(data, 0)?;
+    let metadata =
+        create_metadata_simple(signature, slot, tx_index, block_time_us, pool, grpc_recv_us);
+    parse_initialize_reward_from_data(data, metadata)
 }
 
-/// 解析 Fund Reward 事件
+/// Decode the exact official `EvtFundReward` body, shared by log and CPI paths.
+#[inline(always)]
+pub fn parse_fund_reward_from_data(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
+    if data.len() != 153 {
+        return None;
+    }
+    Some(DexEvent::MeteoraDammV2FundReward(
+        MeteoraDammV2FundRewardEvent {
+            metadata,
+            pool: read_pubkey(data, 0)?,
+            funder: read_pubkey(data, 32)?,
+            mint_reward: read_pubkey(data, 64)?,
+            reward_index: *data.get(96)?,
+            amount: read_u64_le(data, 97)?,
+            transfer_fee_excluded_amount_in: read_u64_le(data, 105)?,
+            reward_duration_end: read_u64_le(data, 113)?,
+            pre_reward_rate: read_u128_le(data, 121)?,
+            post_reward_rate: read_u128_le(data, 137)?,
+        },
+    ))
+}
+
 fn parse_fund_reward_event(
     data: &[u8],
     signature: Signature,
@@ -688,33 +699,31 @@ fn parse_fund_reward_event(
     block_time_us: Option<i64>,
     grpc_recv_us: i64,
 ) -> Option<DexEvent> {
-    // let mut offset = 0;
-
-    // let lb_pair = read_pubkey(data, offset)?;
-    // offset += 32;
-
-    // let funder = read_pubkey(data, offset)?;
-    // offset += 32;
-
-    // let reward_index = read_u64_le(data, offset)?;
-    // offset += 8;
-
-    // let amount = read_u64_le(data, offset)?;
-
-    // let metadata =
-    //     create_metadata_simple(signature, slot, tx_index, block_time_us, lb_pair, grpc_recv_us);
-
-    // Some(DexEvent::MeteoraDammV2FundReward(MeteoraDammV2FundRewardEvent {
-    //     metadata,
-    //     lb_pair,
-    //     funder,
-    //     reward_index,
-    //     amount,
-    // }))
-    None
+    let pool = read_pubkey(data, 0)?;
+    let metadata =
+        create_metadata_simple(signature, slot, tx_index, block_time_us, pool, grpc_recv_us);
+    parse_fund_reward_from_data(data, metadata)
 }
 
-/// 解析 Claim Reward 事件
+/// Decode the exact official `EvtClaimReward` body, shared by log and CPI paths.
+#[inline(always)]
+pub fn parse_claim_reward_from_data(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
+    if data.len() != 137 {
+        return None;
+    }
+    Some(DexEvent::MeteoraDammV2ClaimReward(
+        MeteoraDammV2ClaimRewardEvent {
+            metadata,
+            pool: read_pubkey(data, 0)?,
+            position: read_pubkey(data, 32)?,
+            owner: read_pubkey(data, 64)?,
+            mint_reward: read_pubkey(data, 96)?,
+            reward_index: *data.get(128)?,
+            total_reward: read_u64_le(data, 129)?,
+        },
+    ))
+}
+
 fn parse_claim_reward_event(
     data: &[u8],
     signature: Signature,
@@ -723,34 +732,10 @@ fn parse_claim_reward_event(
     block_time_us: Option<i64>,
     grpc_recv_us: i64,
 ) -> Option<DexEvent> {
-    // let mut offset = 0;
-
-    // let lb_pair = read_pubkey(data, offset)?;
-    // offset += 32;
-
-    // let position = read_pubkey(data, offset)?;
-    // offset += 32;
-
-    // let owner = read_pubkey(data, offset)?;
-    // offset += 32;
-
-    // let reward_index = read_u64_le(data, offset)?;
-    // offset += 8;
-
-    // let total_reward = read_u64_le(data, offset)?;
-
-    // let metadata =
-    //     create_metadata_simple(signature, slot, tx_index, block_time_us, lb_pair, grpc_recv_us);
-
-    // Some(DexEvent::MeteoraDammV2ClaimReward(MeteoraDammV2ClaimRewardEvent {
-    //     metadata,
-    //     lb_pair,
-    //     position,
-    //     owner,
-    //     reward_index,
-    //     total_reward,
-    // }))
-    None
+    let pool = read_pubkey(data, 0)?;
+    let metadata =
+        create_metadata_simple(signature, slot, tx_index, block_time_us, pool, grpc_recv_us);
+    parse_claim_reward_from_data(data, metadata)
 }
 
 /// 解析文本格式日志

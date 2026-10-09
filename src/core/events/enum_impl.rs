@@ -49,6 +49,10 @@ pub enum DexEvent {
     MeteoraDammV2AddLiquidity(MeteoraDammV2AddLiquidityEvent), // - 已对接
     MeteoraDammV2RemoveLiquidity(MeteoraDammV2RemoveLiquidityEvent), // - 已对接
     MeteoraDammV2InitializePool(MeteoraDammV2InitializePoolEvent), // - 已对接
+    MeteoraDammV2ClaimPositionFee(MeteoraDammV2ClaimPositionFeeEvent),
+    MeteoraDammV2InitializeReward(MeteoraDammV2InitializeRewardEvent),
+    MeteoraDammV2FundReward(MeteoraDammV2FundRewardEvent),
+    MeteoraDammV2ClaimReward(MeteoraDammV2ClaimRewardEvent),
 
     // Meteora DBC 事件
     MeteoraDbcSwap(MeteoraDbcSwapEvent),
@@ -85,8 +89,11 @@ pub enum DexEvent {
     // Raydium CPMM 事件
     RaydiumCpmmSwap(RaydiumCpmmSwapEvent),
     RaydiumCpmmDeposit(RaydiumCpmmDepositEvent),
+    RaydiumCpmmLpChange(RaydiumCpmmLpChangeEvent),
     RaydiumCpmmWithdraw(RaydiumCpmmWithdrawEvent),
     RaydiumCpmmInitialize(RaydiumCpmmInitializeEvent),
+    RaydiumCpmmCollectCreatorFee(RaydiumCpmmCollectCreatorFeeEvent),
+    RaydiumCpmmCreatorFeeShareAccount(Box<RaydiumCpmmCreatorFeeShareAccountEvent>),
     RaydiumCpmmAmmConfigAccount(Box<RaydiumCpmmAmmConfigAccountEvent>),
     RaydiumCpmmPoolStateAccount(Box<RaydiumCpmmPoolStateAccountEvent>),
 
@@ -138,6 +145,10 @@ pub enum DexEvent {
 
     // 错误事件
     Error(String),
+    PumpFunPostCompleteBuy(PumpFunPostCompleteBuyEvent),
+    PumpFunSweepBondingCurveFee(PumpFunSweepBondingCurveFeeEvent),
+    PumpFunComplete(PumpFunCompleteEvent),
+    PumpSwapSweepPoolFee(PumpSwapSweepPoolFeeEvent),
 }
 
 // 静态默认 EventMetadata，用于 Error 事件
@@ -154,7 +165,7 @@ impl DexEvent {
     /// 获取事件的元数据
     pub fn metadata(&self) -> &EventMetadata {
         match self {
-            // PumpFun 事件
+    // PumpFun 事件
             DexEvent::PumpFunCreate(e) => &e.metadata,
             DexEvent::PumpFunCreateV2(e) => &e.metadata,
             DexEvent::PumpFunTrade(e) => &e.metadata,
@@ -171,6 +182,10 @@ impl DexEvent {
             DexEvent::PumpFeesUpdateFeeConfig(e) => &e.metadata,
             DexEvent::PumpFeesUpdateFeeShares(e) => &e.metadata,
             DexEvent::PumpFeesUpsertFeeTiers(e) => &e.metadata,
+            DexEvent::PumpFunPostCompleteBuy(e) => &e.metadata,
+            DexEvent::PumpFunSweepBondingCurveFee(e) => &e.metadata,
+            DexEvent::PumpFunComplete(e) => &e.metadata,
+            DexEvent::PumpSwapSweepPoolFee(e) => &e.metadata,
             DexEvent::PumpFunMigrateBondingCurveCreator(e) => &e.metadata,
             DexEvent::PumpFunGlobalAccount(e) => &e.metadata,
             DexEvent::PumpFunBondingCurveAccount(e) => &e.metadata,
@@ -194,6 +209,10 @@ impl DexEvent {
             DexEvent::MeteoraDammV2AddLiquidity(e) => &e.metadata,
             DexEvent::MeteoraDammV2RemoveLiquidity(e) => &e.metadata,
             DexEvent::MeteoraDammV2InitializePool(e) => &e.metadata,
+            DexEvent::MeteoraDammV2ClaimPositionFee(e) => &e.metadata,
+            DexEvent::MeteoraDammV2InitializeReward(e) => &e.metadata,
+            DexEvent::MeteoraDammV2FundReward(e) => &e.metadata,
+            DexEvent::MeteoraDammV2ClaimReward(e) => &e.metadata,
             DexEvent::MeteoraDbcSwap(e) => &e.metadata,
             DexEvent::MeteoraDbcInitializePool(e) => &e.metadata,
             DexEvent::MeteoraDbcCurveComplete(e) => &e.metadata,
@@ -228,8 +247,11 @@ impl DexEvent {
             // Raydium CPMM 事件
             DexEvent::RaydiumCpmmSwap(e) => &e.metadata,
             DexEvent::RaydiumCpmmDeposit(e) => &e.metadata,
+            DexEvent::RaydiumCpmmLpChange(e) => &e.metadata,
             DexEvent::RaydiumCpmmWithdraw(e) => &e.metadata,
             DexEvent::RaydiumCpmmInitialize(e) => &e.metadata,
+            DexEvent::RaydiumCpmmCollectCreatorFee(e) => &e.metadata,
+            DexEvent::RaydiumCpmmCreatorFeeShareAccount(e) => &e.metadata,
             DexEvent::RaydiumCpmmAmmConfigAccount(e) => &e.metadata,
             DexEvent::RaydiumCpmmPoolStateAccount(e) => &e.metadata,
 
@@ -303,6 +325,10 @@ impl DexEvent {
             DexEvent::PumpFeesUpdateFeeConfig(e) => Some(&mut e.metadata),
             DexEvent::PumpFeesUpdateFeeShares(e) => Some(&mut e.metadata),
             DexEvent::PumpFeesUpsertFeeTiers(e) => Some(&mut e.metadata),
+            DexEvent::PumpFunPostCompleteBuy(e) => Some(&mut e.metadata),
+            DexEvent::PumpFunSweepBondingCurveFee(e) => Some(&mut e.metadata),
+            DexEvent::PumpFunComplete(e) => Some(&mut e.metadata),
+            DexEvent::PumpSwapSweepPoolFee(e) => Some(&mut e.metadata),
             DexEvent::PumpFunMigrateBondingCurveCreator(e) => Some(&mut e.metadata),
             DexEvent::PumpFunGlobalAccount(e) => Some(&mut e.metadata),
             DexEvent::PumpFunBondingCurveAccount(e) => Some(&mut e.metadata),
@@ -322,6 +348,10 @@ impl DexEvent {
             DexEvent::MeteoraDammV2AddLiquidity(e) => Some(&mut e.metadata),
             DexEvent::MeteoraDammV2RemoveLiquidity(e) => Some(&mut e.metadata),
             DexEvent::MeteoraDammV2InitializePool(e) => Some(&mut e.metadata),
+            DexEvent::MeteoraDammV2ClaimPositionFee(e) => Some(&mut e.metadata),
+            DexEvent::MeteoraDammV2InitializeReward(e) => Some(&mut e.metadata),
+            DexEvent::MeteoraDammV2FundReward(e) => Some(&mut e.metadata),
+            DexEvent::MeteoraDammV2ClaimReward(e) => Some(&mut e.metadata),
             DexEvent::MeteoraDbcSwap(e) => Some(&mut e.metadata),
             DexEvent::MeteoraDbcInitializePool(e) => Some(&mut e.metadata),
             DexEvent::MeteoraDbcCurveComplete(e) => Some(&mut e.metadata),
@@ -350,8 +380,11 @@ impl DexEvent {
             DexEvent::RaydiumClmmTickArrayStateAccount(e) => Some(&mut e.metadata),
             DexEvent::RaydiumCpmmSwap(e) => Some(&mut e.metadata),
             DexEvent::RaydiumCpmmDeposit(e) => Some(&mut e.metadata),
+            DexEvent::RaydiumCpmmLpChange(e) => Some(&mut e.metadata),
             DexEvent::RaydiumCpmmWithdraw(e) => Some(&mut e.metadata),
             DexEvent::RaydiumCpmmInitialize(e) => Some(&mut e.metadata),
+            DexEvent::RaydiumCpmmCollectCreatorFee(e) => Some(&mut e.metadata),
+            DexEvent::RaydiumCpmmCreatorFeeShareAccount(e) => Some(&mut e.metadata),
             DexEvent::RaydiumCpmmAmmConfigAccount(e) => Some(&mut e.metadata),
             DexEvent::RaydiumCpmmPoolStateAccount(e) => Some(&mut e.metadata),
             DexEvent::RaydiumAmmV4Swap(e) => Some(&mut e.metadata),

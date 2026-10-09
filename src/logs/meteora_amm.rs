@@ -109,6 +109,7 @@ pub fn parse_swap_from_data(data: &[u8], metadata: EventMetadata) -> Option<DexE
         trade_fee,
         admin_fee,
         host_fee,
+        ..Default::default()
     }))
 }
 
@@ -131,6 +132,7 @@ pub fn parse_add_liquidity_from_data(data: &[u8], metadata: EventMetadata) -> Op
             lp_mint_amount,
             token_a_amount,
             token_b_amount,
+            ..Default::default()
         },
     ))
 }
@@ -154,6 +156,7 @@ pub fn parse_remove_liquidity_from_data(data: &[u8], metadata: EventMetadata) ->
             lp_unmint_amount,
             token_a_out_amount,
             token_b_out_amount,
+            ..Default::default()
         },
     ))
 }
@@ -184,6 +187,7 @@ pub fn parse_bootstrap_liquidity_from_data(
             token_a_amount,
             token_b_amount,
             pool,
+            ..Default::default()
         },
     ))
 }
@@ -215,6 +219,7 @@ pub fn parse_pool_created_from_data(data: &[u8], metadata: EventMetadata) -> Opt
             token_b_mint,
             pool_type,
             pool,
+            ..Default::default()
         },
     ))
 }
@@ -246,6 +251,9 @@ pub fn parse_set_pool_fees_from_data(data: &[u8], metadata: EventMetadata) -> Op
             owner_trade_fee_numerator,
             owner_trade_fee_denominator,
             pool,
+            protocol_trade_fee_numerator: owner_trade_fee_numerator,
+            protocol_trade_fee_denominator: owner_trade_fee_denominator,
+            ..Default::default()
         },
     ))
 }
@@ -285,6 +293,7 @@ fn parse_swap_event(
         trade_fee,
         admin_fee,
         host_fee,
+        ..Default::default()
     }))
 }
 
@@ -315,6 +324,7 @@ fn parse_add_liquidity_event(
             lp_mint_amount,
             token_a_amount,
             token_b_amount,
+            ..Default::default()
         },
     ))
 }
@@ -346,6 +356,7 @@ fn parse_remove_liquidity_event(
             lp_unmint_amount,
             token_a_out_amount,
             token_b_out_amount,
+            ..Default::default()
         },
     ))
 }
@@ -382,6 +393,7 @@ fn parse_bootstrap_liquidity_event(
             token_a_amount,
             token_b_amount,
             pool,
+            ..Default::default()
         },
     ))
 }
@@ -422,6 +434,7 @@ fn parse_pool_created_event(
             token_b_mint,
             pool_type,
             pool,
+            ..Default::default()
         },
     ))
 }
@@ -462,6 +475,9 @@ fn parse_set_pool_fees_event(
             owner_trade_fee_numerator,
             owner_trade_fee_denominator,
             pool,
+            protocol_trade_fee_numerator: owner_trade_fee_numerator,
+            protocol_trade_fee_denominator: owner_trade_fee_denominator,
+            ..Default::default()
         },
     ))
 }
@@ -476,4 +492,34 @@ fn parse_text_log(
 ) -> Option<DexEvent> {
     // 目前暂不实现文本解析，主要依赖结构化解析
     None
+}
+
+#[cfg(test)]
+mod protocol_fee_alias_tests {
+    use super::*;
+    #[test]
+    fn log_protocol_fee_fields_preserve_historical_aliases() {
+        let mut data = Vec::new();
+        for v in [0u64, u64::MAX, 123, 456] {
+            data.extend_from_slice(&v.to_le_bytes());
+        }
+        data.extend_from_slice(solana_sdk::pubkey::Pubkey::new_unique().as_ref());
+        let DexEvent::MeteoraPoolsSetPoolFees(e) =
+            parse_set_pool_fees_from_data(&data, EventMetadata::default()).unwrap()
+        else {
+            panic!("fees")
+        };
+        assert_eq!(
+            (
+                e.protocol_trade_fee_numerator,
+                e.protocol_trade_fee_denominator
+            ),
+            (123, 456)
+        );
+        assert_eq!(
+            (e.owner_trade_fee_numerator, e.owner_trade_fee_denominator),
+            (123, 456)
+        );
+        assert_eq!(e.new_partner_fee_numerator, 0);
+    }
 }

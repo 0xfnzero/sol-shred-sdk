@@ -1,0 +1,22 @@
+[package]
+name = "shred-parser-parity"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[features]
+parse-zero-copy = ["sol-shred-sdk/parse-zero-copy", "sol-parser-sdk/parse-zero-copy"]
+
+[dependencies]
+sol-shred-sdk = { path = "../.." }
+sol-parser-sdk = { path = "../../../sol-parser-sdk" }
+serde_json = { version = "1", features = ["arbitrary_precision"] }
+yellowstone-grpc-proto = { version = "=12.7.0", default-features = false }
+
+prost = "=0.14.4"
+base64 = "0.22"
+wincode = "=0.5.5"
+solana-transaction-status = { version = "=4.2.2", features = ["agave-unstable-api"] }
+
+[patch.crates-io]
+solana-keypair = { path = "../../../sol-parser-sdk/patches/solana-keypair" }

@@ -129,6 +129,19 @@ pub fn parse_pumpfun_inner_instruction(
     metadata: EventMetadata,
     is_created_buy: bool,
 ) -> Option<DexEvent> {
+    let disc = if discriminator[..8] == [228, 69, 165, 46, 81, 203, 154, 29] {
+        Some(u64::from_le_bytes(discriminator[8..].try_into().ok()?))
+    } else if discriminator[8..] == [155, 167, 108, 32, 122, 76, 173, 64] {
+        Some(u64::from_le_bytes(discriminator[..8].try_into().ok()?))
+    } else {
+        None
+    };
+    let program = solana_sdk::pubkey!("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P");
+    if let Some(disc) = disc {
+        if crate::logs::pump_upgrade::event_type(disc, Some(&program)).is_some() {
+            return crate::logs::pump_upgrade::parse(disc, data, metadata, Some(&program));
+        }
+    }
     match *discriminator {
         discriminators::TRADE_EVENT => parse_trade_event_inner(data, metadata, is_created_buy),
         discriminators::CREATE_TOKEN_EVENT => parse_create_event_inner(data, metadata),
@@ -320,6 +333,8 @@ fn parse_trade_event_inner_zero_copy(
             quote_amount,
             virtual_quote_reserves,
             real_quote_reserves,
+            holder_rewards_bps,
+            holder_rewards,
         ) = crate::logs::pump::read_trade_event_extensions(data, &mut offset)?;
 
         // Inner instruction 只包含日志数据，不含指令上下文账户；is_created_buy 由外层根据同 tx 是否含 create 传入
@@ -358,6 +373,12 @@ fn parse_trade_event_inner_zero_copy(
             quote_amount,
             virtual_quote_reserves,
             real_quote_reserves,
+            holder_rewards_bps,
+            holder_rewards,
+            creator_fee_unclaimed: data
+                .get(offset..offset + 8)
+                .map(|b| u64::from_le_bytes(b.try_into().unwrap()))
+                .unwrap_or(0),
             is_cashback_coin: cashback_fee_basis_points > 0,
             ..Default::default() // 其他账户字段由 instruction 提供
         };
@@ -452,6 +473,28 @@ fn parse_create_event_fields(data: &[u8], metadata: EventMetadata) -> Option<Dex
     let symbol = read_string(data, &mut offset)?;
     let uri = read_string(data, &mut offset)?;
 
+    if !crate::logs::pump::valid_create_event_body(&data[offset..]) {
+        return None;
+    }
+
+    if data.len() - offset == 96 {
+        return Some(DexEvent::PumpFunCreate(PumpFunCreateTokenEvent {
+            metadata,
+            name,
+            symbol,
+            uri,
+            mint: read_pubkey(data, offset)?,
+            bonding_curve: read_pubkey(data, offset + 32)?,
+            user: read_pubkey(data, offset + 64)?,
+            ix_name: "create".into(),
+            quote_mint: PUMPFUN_SOLSCAN_SOL_QUOTE_MINT,
+            ..Default::default()
+        }));
+    }
+    if data.len() - offset < 201 {
+        return None;
+    }
+
     let mint = read_pubkey(data, offset)?;
     offset += 32;
     let bonding_curve = read_pubkey(data, offset)?;
@@ -480,6 +523,11 @@ fn parse_create_event_fields(data: &[u8], metadata: EventMetadata) -> Option<Dex
     let quote_mint = normalize_pumpfun_quote_mint(read_pubkey(data, offset).unwrap_or_default());
     offset += 32;
     let virtual_quote_reserves = read_u64_le(data, offset).unwrap_or_default();
+    offset += 8;
+    let creator_fee_bps = read_u64_le(data, offset).unwrap_or_default();
+    offset += 8;
+    let is_holder_reward = data.get(offset).copied().unwrap_or_default() == 1;
+    let depth = data.get(offset + 1).copied().unwrap_or_default();
 
     Some(DexEvent::PumpFunCreate(PumpFunCreateTokenEvent {
         metadata,
@@ -500,6 +548,9 @@ fn parse_create_event_fields(data: &[u8], metadata: EventMetadata) -> Option<Dex
         is_cashback_enabled,
         quote_mint,
         virtual_quote_reserves,
+        creator_fee_bps,
+        is_holder_reward,
+        depth,
         ix_name: "create".to_string(),
         ..Default::default()
     }))
@@ -523,6 +574,24 @@ fn parse_create_event_inner_zero_copy(data: &[u8], metadata: EventMetadata) -> O
         let (uri, uri_len) = read_str_unchecked(data, offset)?;
         offset += uri_len;
 
+        if !crate::logs::pump::valid_create_event_body(&data[offset..]) {
+            return None;
+        }
+
+        if data.len() - offset == 96 {
+            return Some(DexEvent::PumpFunCreate(PumpFunCreateTokenEvent {
+                metadata: metadata,
+                name: name.to_string(),
+                symbol: symbol.to_string(),
+                uri: uri.to_string(),
+                mint: read_pubkey_unchecked(data, offset),
+                bonding_curve: read_pubkey_unchecked(data, offset + 32),
+                user: read_pubkey_unchecked(data, offset + 64),
+                ix_name: "create".into(),
+                quote_mint: PUMPFUN_SOLSCAN_SOL_QUOTE_MINT,
+                ..Default::default()
+            }));
+        }
         if data.len() < offset + 32 + 32 + 32 + 32 + 8 + 8 + 8 + 8 + 8 + 32 + 1 {
             return None;
         }
@@ -586,6 +655,18 @@ fn parse_create_event_inner_zero_copy(data: &[u8], metadata: EventMetadata) -> O
         } else {
             0
         };
+        offset += 8;
+        let creator_fee_bps = if offset + 8 <= data.len() {
+            read_u64_unchecked(data, offset)
+        } else {
+            0
+        };
+        offset += 8;
+        let is_holder_reward = if offset < data.len() {
+            read_bool_unchecked(data, offset)
+        } else {
+            false
+        };
 
         Some(DexEvent::PumpFunCreate(PumpFunCreateTokenEvent {
             metadata,
@@ -606,6 +687,9 @@ fn parse_create_event_inner_zero_copy(data: &[u8], metadata: EventMetadata) -> O
             is_cashback_enabled,
             quote_mint,
             virtual_quote_reserves,
+            creator_fee_bps,
+            is_holder_reward,
+            depth: data.get(offset + 1).copied().unwrap_or(0),
             ix_name: "create".to_string(),
             ..Default::default()
         }))
@@ -760,6 +844,43 @@ mod tests {
     fn string_reader_rejects_invalid_utf8() {
         let data = [1, 0, 0, 0, 0xff];
         assert!(unsafe { read_str_unchecked(&data, 0) }.is_none());
+    }
+
+    #[test]
+    fn create_event_depth_matches_log_decoder_and_defaults_for_legacy_tail() {
+        // Three empty Borsh strings followed by the current CreateEvent body.
+        let mut data = vec![0u8; 12 + 252];
+        for depth in [0, 7, u8::MAX] {
+            data[12 + 251] = depth;
+            let DexEvent::PumpFunCreate(inner) = parse_pumpfun_inner_instruction(
+                &discriminators::CREATE_TOKEN_EVENT,
+                &data,
+                EventMetadata::default(),
+                false,
+            )
+            .unwrap() else {
+                panic!("CreateEvent");
+            };
+            let DexEvent::PumpFunCreate(log) =
+                crate::logs::pump::parse_create_from_data(&data, EventMetadata::default()).unwrap()
+            else {
+                panic!("CreateEvent log");
+            };
+            assert_eq!(inner.depth, depth);
+            assert_eq!(inner.depth, log.depth);
+        }
+        for body_len in [201, 250, 251] {
+            let DexEvent::PumpFunCreate(inner) = parse_pumpfun_inner_instruction(
+                &discriminators::CREATE_TOKEN_EVENT,
+                &data[..12 + body_len],
+                EventMetadata::default(),
+                false,
+            )
+            .unwrap() else {
+                panic!("legacy CreateEvent");
+            };
+            assert_eq!(inner.depth, 0);
+        }
     }
 
     #[test]

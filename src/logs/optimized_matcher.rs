@@ -246,6 +246,8 @@ mod discriminators {
         u64::from_le_bytes([206, 87, 17, 79, 45, 41, 213, 61]);
 
     // Raydium CPMM discriminators
+    pub const RAYDIUM_CPMM_LP_CHANGE_EVENT: u64 =
+        u64::from_le_bytes([121, 163, 205, 201, 57, 218, 117, 60]);
     pub const RAYDIUM_CPMM_SWAP_BASE_IN: u64 =
         u64::from_le_bytes([143, 190, 90, 218, 196, 30, 51, 222]);
     pub const RAYDIUM_CPMM_SWAP_EVENT: u64 =
@@ -302,9 +304,19 @@ mod discriminators {
         u64::from_le_bytes([156, 15, 119, 198, 29, 181, 221, 55]);
     pub const METEORA_DAMM_CLOSE_POSITION: u64 =
         u64::from_le_bytes([20, 145, 144, 68, 143, 142, 214, 178]);
+    pub const METEORA_DAMM_CLAIM_POSITION_FEE: u64 =
+        u64::from_le_bytes([198, 182, 183, 52, 97, 12, 49, 56]);
+    pub const METEORA_DAMM_INITIALIZE_REWARD: u64 =
+        u64::from_le_bytes([129, 91, 188, 3, 246, 52, 185, 249]);
+    pub const METEORA_DAMM_FUND_REWARD: u64 =
+        u64::from_le_bytes([104, 233, 237, 122, 199, 191, 121, 85]);
+    pub const METEORA_DAMM_CLAIM_REWARD: u64 =
+        u64::from_le_bytes([218, 86, 147, 200, 235, 188, 215, 231]);
 
     // Meteora DBC discriminators. Some values intentionally overlap DAMM V2,
     // so they must be routed with program context.
+    pub const METEORA_DBC_SWAP2: u64 = u64::from_le_bytes([189, 66, 51, 168, 38, 80, 117, 153]);
+    pub const METEORA_DBC_SWAP2_TRANSFER_HOOK: u64 = u64::from_le_bytes([134, 59, 168, 120, 94, 51, 114, 231]);
     pub const METEORA_DBC_SWAP: u64 = u64::from_le_bytes([27, 60, 21, 213, 138, 170, 187, 147]);
     pub const METEORA_DBC_INITIALIZE_POOL: u64 =
         u64::from_le_bytes([228, 50, 246, 85, 203, 66, 134, 37]);
@@ -658,6 +670,8 @@ fn parse_log_optimized_inner(
         recent_blockhash: recent_blockhash.map(|s| bs58::encode(s).into_string()),
     };
 
+    if crate::logs::pump_upgrade::event_type(discriminator,program_id).is_some() {return apply_event_type_filter(crate::logs::pump_upgrade::parse(discriminator,data,metadata,program_id)?,event_type_filter);}
+
     if let Some(program_id) = program_id {
         return parse_program_scoped_event(
             program_id,
@@ -823,6 +837,10 @@ fn parse_log_optimized_inner(
             crate::logs::raydium_clmm::parse_collect_protocol_fee_from_data(data, metadata)
         }
 
+        discriminators::RAYDIUM_CPMM_LP_CHANGE_EVENT => {
+            crate::logs::raydium_cpmm::parse_lp_change_from_data(data, metadata)
+                .and_then(|event| apply_event_type_filter(event, event_type_filter))
+        }
         // Raydium CPMM - use from_data functions (single decode)
         discriminators::RAYDIUM_CPMM_SWAP_BASE_IN => {
             crate::logs::raydium_cpmm::parse_swap_base_in_from_data(data, metadata)
@@ -915,6 +933,18 @@ fn parse_log_optimized_inner(
         discriminators::METEORA_DAMM_CLOSE_POSITION => {
             crate::logs::meteora_damm::parse_close_position_from_data(data, metadata)
         }
+        discriminators::METEORA_DAMM_CLAIM_POSITION_FEE => {
+            crate::logs::meteora_damm::parse_claim_position_fee_from_data(data, metadata)
+        }
+        discriminators::METEORA_DAMM_INITIALIZE_REWARD => {
+            crate::logs::meteora_damm::parse_initialize_reward_from_data(data, metadata)
+        }
+        discriminators::METEORA_DAMM_FUND_REWARD => {
+            crate::logs::meteora_damm::parse_fund_reward_from_data(data, metadata)
+        }
+        discriminators::METEORA_DAMM_CLAIM_REWARD => {
+            crate::logs::meteora_damm::parse_claim_reward_from_data(data, metadata)
+        }
 
         // NOTE: current Meteora DLMM discriminators overlap other Meteora
         // programs, so DLMM is routed in the program-scoped path.
@@ -943,6 +973,7 @@ fn program_scoped_discriminator_to_event_type(
     program_id: &Pubkey,
     discriminator: u64,
 ) -> Option<EventType> {
+    if let Some(kind)=crate::logs::pump_upgrade::event_type(discriminator,Some(program_id)){return Some(kind);}
     match *program_id {
         program_ids::PUMPFUN_PROGRAM_ID => match discriminator {
             discriminators::PUMPFUN_CREATE => Some(EventType::PumpFunCreate),
@@ -1091,10 +1122,18 @@ fn program_scoped_discriminator_to_event_type(
             discriminators::METEORA_DAMM_CLOSE_POSITION => {
                 Some(EventType::MeteoraDammV2ClosePosition)
             }
+            discriminators::METEORA_DAMM_CLAIM_POSITION_FEE => {
+                Some(EventType::MeteoraDammV2ClaimPositionFee)
+            }
+            discriminators::METEORA_DAMM_INITIALIZE_REWARD => {
+                Some(EventType::MeteoraDammV2InitializeReward)
+            }
+            discriminators::METEORA_DAMM_FUND_REWARD => Some(EventType::MeteoraDammV2FundReward),
+            discriminators::METEORA_DAMM_CLAIM_REWARD => Some(EventType::MeteoraDammV2ClaimReward),
             _ => None,
         },
         program_ids::METEORA_DBC_PROGRAM_ID => match discriminator {
-            discriminators::METEORA_DBC_SWAP => Some(EventType::MeteoraDbcSwap),
+            discriminators::METEORA_DBC_SWAP | discriminators::METEORA_DBC_SWAP2 | discriminators::METEORA_DBC_SWAP2_TRANSFER_HOOK => Some(EventType::MeteoraDbcSwap),
             discriminators::METEORA_DBC_INITIALIZE_POOL => {
                 Some(EventType::MeteoraDbcInitializePool)
             }
@@ -1334,6 +1373,12 @@ fn parse_program_scoped_event(
                 }
             }
             match discriminator {
+                // change_type selects Deposit/Withdraw after decoding; narrow filters
+                // are applied to the parsed event instead of guessing from the discriminator.
+                discriminators::RAYDIUM_CPMM_LP_CHANGE_EVENT => {
+                    crate::logs::raydium_cpmm::parse_lp_change_from_data(data, metadata)
+                        .and_then(|event| apply_event_type_filter(event, event_type_filter))
+                }
                 discriminators::RAYDIUM_CPMM_SWAP_EVENT => {
                     crate::logs::raydium_cpmm::parse_swap_event_from_data(data, metadata)
                 }
@@ -1461,6 +1506,18 @@ fn parse_program_scoped_event(
                 discriminators::METEORA_DAMM_CLOSE_POSITION => {
                     crate::logs::meteora_damm::parse_close_position_from_data(data, metadata)
                 }
+                discriminators::METEORA_DAMM_CLAIM_POSITION_FEE => {
+                    crate::logs::meteora_damm::parse_claim_position_fee_from_data(data, metadata)
+                }
+                discriminators::METEORA_DAMM_INITIALIZE_REWARD => {
+                    crate::logs::meteora_damm::parse_initialize_reward_from_data(data, metadata)
+                }
+                discriminators::METEORA_DAMM_FUND_REWARD => {
+                    crate::logs::meteora_damm::parse_fund_reward_from_data(data, metadata)
+                }
+                discriminators::METEORA_DAMM_CLAIM_REWARD => {
+                    crate::logs::meteora_damm::parse_claim_reward_from_data(data, metadata)
+                }
                 _ => None,
             }
         }
@@ -1473,6 +1530,9 @@ fn parse_program_scoped_event(
             match discriminator {
                 discriminators::METEORA_DBC_SWAP => {
                     crate::logs::meteora_dbc::parse_swap_from_data(data, metadata)
+                }
+                discriminators::METEORA_DBC_SWAP2 | discriminators::METEORA_DBC_SWAP2_TRANSFER_HOOK => {
+                    crate::logs::meteora_dbc::parse_swap2_from_data(data, metadata, discriminator == discriminators::METEORA_DBC_SWAP2_TRANSFER_HOOK)
                 }
                 discriminators::METEORA_DBC_INITIALIZE_POOL => {
                     crate::logs::meteora_dbc::parse_initialize_pool_from_data(data, metadata)
@@ -1577,6 +1637,8 @@ fn filter_pumpfun_trade_variant(
 /// Map discriminator to EventType (compile-time optimized match)
 #[inline(always)]
 fn discriminator_to_event_type(discriminator: u64) -> Option<EventType> {
+    if let Some(kind)=crate::logs::pump_upgrade::event_type(discriminator,None){return Some(kind);}
+
     match discriminator {
         discriminators::PUMPFUN_CREATE => Some(EventType::PumpFunCreate),
         discriminators::PUMPFUN_TRADE => Some(EventType::PumpFunTrade),
@@ -1690,6 +1752,14 @@ fn discriminator_to_event_type(discriminator: u64) -> Option<EventType> {
             Some(EventType::MeteoraDammV2CreatePosition)
         }
         discriminators::METEORA_DAMM_CLOSE_POSITION => Some(EventType::MeteoraDammV2ClosePosition),
+        discriminators::METEORA_DAMM_CLAIM_POSITION_FEE => {
+            Some(EventType::MeteoraDammV2ClaimPositionFee)
+        }
+        discriminators::METEORA_DAMM_INITIALIZE_REWARD => {
+            Some(EventType::MeteoraDammV2InitializeReward)
+        }
+        discriminators::METEORA_DAMM_FUND_REWARD => Some(EventType::MeteoraDammV2FundReward),
+        discriminators::METEORA_DAMM_CLAIM_REWARD => Some(EventType::MeteoraDammV2ClaimReward),
         _ => None,
     }
 }

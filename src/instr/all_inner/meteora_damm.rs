@@ -38,6 +38,18 @@ pub mod discriminators {
     pub const CLOSE_POSITION: [u8; 16] = [
         228, 69, 165, 46, 81, 203, 154, 29, 20, 145, 144, 68, 143, 142, 214, 178,
     ];
+    pub const CLAIM_POSITION_FEE: [u8; 16] = [
+        228, 69, 165, 46, 81, 203, 154, 29, 198, 182, 183, 52, 97, 12, 49, 56,
+    ];
+    pub const INITIALIZE_REWARD: [u8; 16] = [
+        228, 69, 165, 46, 81, 203, 154, 29, 129, 91, 188, 3, 246, 52, 185, 249,
+    ];
+    pub const FUND_REWARD: [u8; 16] = [
+        228, 69, 165, 46, 81, 203, 154, 29, 104, 233, 237, 122, 199, 191, 121, 85,
+    ];
+    pub const CLAIM_REWARD: [u8; 16] = [
+        228, 69, 165, 46, 81, 203, 154, 29, 218, 86, 147, 200, 235, 188, 215, 231,
+    ];
 }
 
 /// 主入口：根据 discriminator 解析事件
@@ -53,6 +65,18 @@ pub fn parse(disc: &[u8; 16], data: &[u8], metadata: EventMetadata) -> Option<De
         }
         discriminators::CREATE_POSITION => parse_create_position(data, metadata),
         discriminators::CLOSE_POSITION => parse_close_position(data, metadata),
+        discriminators::CLAIM_POSITION_FEE => {
+            crate::logs::meteora_damm::parse_claim_position_fee_from_data(data, metadata)
+        }
+        discriminators::INITIALIZE_REWARD => {
+            crate::logs::meteora_damm::parse_initialize_reward_from_data(data, metadata)
+        }
+        discriminators::FUND_REWARD => {
+            crate::logs::meteora_damm::parse_fund_reward_from_data(data, metadata)
+        }
+        discriminators::CLAIM_REWARD => {
+            crate::logs::meteora_damm::parse_claim_reward_from_data(data, metadata)
+        }
         _ => None,
     }
 }

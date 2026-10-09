@@ -54,7 +54,7 @@ Source/decode mode is selected with `ShredDecodeMode`. Native raw UDP shreds are
 Migrated parser families match the `sol-parser-sdk` parser surface:
 
 - PumpFun, PumpFun v2/Mayhem, Pump fees, PumpSwap
-- Raydium LaunchLab, CPMM, CLMM, AMM V4
+- Raydium LaunchLab / StonkFun, CPMM, CLMM, AMM V4
 - Orca Whirlpool
 - Meteora Pools, DAMM V2, DBC, DLMM
 - Token accounts, nonce accounts, selected DEX account state events, and block metadata types
@@ -88,7 +88,7 @@ Add the dependency to your `Cargo.toml`:
 
 ```toml
 # Add to your Cargo.toml
-sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.0" }
+sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.2" }
 ```
 
 ### Use crates.io
@@ -96,10 +96,18 @@ sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.0" }
 ```toml
 # Add to your Cargo.toml
 [dependencies]
-sol-shred-sdk = "4.0.0"
+sol-shred-sdk = "4.0.2"
 ```
 
+PumpFun create/create_v2 account layout and RPC regression details: [PUMPFUN_CREATE_LAYOUT.md](docs/PUMPFUN_CREATE_LAYOUT.md).
+
 ## PumpSwap Effective Quote Reserves
+
+Raw shreds contain outer transaction instructions, without execution logs, inner
+CPI, Pool state or vault balances. Zero reserve/fee fields in outer Buy/Sell
+events mean unavailable data. Quote from a coherent, premaintained account and
+fee configuration cache. The instruction's `min_base_amount_out` is a lower
+bound, not an executed fill; buy parsing preserves `track_volume` and `ix_name`.
 
 PumpSwap Pool accounts and Buy/Sell events expose the appended signed
 `virtual_quote_reserves` field. For quoting and indexing, use:
@@ -123,8 +131,9 @@ assert_eq!(quote_reserve, 500);
 ```
 
 The helper adds in `i128` before converting to `u64`. PumpSwap guarantees the
-effective reserve fits in `u64`; the helper additionally returns `None` for invalid
-or inconsistent inputs. See the [official negative reserve update](https://github.com/pump-fun/pump-public-docs/blob/main/docs/NEGATIVE_VIRTUAL_QUOTE_RESERVES.md).
+effective reserve fits in `u64`; the helper returns `None` for a negative sum or
+a sum above `u64::MAX`. A valid sum does not establish Pool/vault snapshot
+consistency; maintain that consistency in the account cache. See the [official negative reserve update](https://github.com/pump-fun/pump-public-docs/blob/main/docs/NEGATIVE_VIRTUAL_QUOTE_RESERVES.md).
 
 ## Decode Mode
 
@@ -285,6 +294,145 @@ Current local reference result:
 packets_per_sec=3276089 slots_per_sec=102378 tx_per_sec=3276089
 ```
 
+## Instruction account context
+
+Outer swap parsing fills DLMM, Orca, CLMM, and CPMM instruction account context
+and includes the transaction's recent blockhash. DLMM `min_amount_out` is the
+instruction threshold, separate from execution output. CLMM quantity mode does
+not establish `zero_for_one`; direction stays at its default without execution
+data. CLMM `swap`/`swap_v2` expose `ix_name`, `amount`,
+`other_amount_threshold`, `sqrt_price_limit_x64` and `is_base_input`.
+`sqrt_price_x64` is the executed ending price and stays zero in outer-only
+parsing; it no longer contains the instruction price limit. Log merging preserves
+wire limits/mode and execution fields independently. The discriminator selects
+the legacy or V2 account layout. Built-in parsing and gRPC account backfilling
+read the full instruction tail; tick arrays are no longer capped at 16.
+`fill_clmm_swap_accounts_with_count` accepts the exact instruction account count;
+the getter-only compatibility helper scans up to 256 positions and stops at
+the first absent/default address.
+For V0 transactions, `parse_transaction_dex_events_with_loaded_addresses`
+accepts caller-resolved writable and readonly ALT addresses in message lookup
+order. It validates counts and instruction indices before appending events and
+performs no RPC requests. The default entry point uses static accounts and skips
+instructions with unresolved program or account keys; PumpFun V2 trades also require
+the gRPC account layout (27 buy accounts or 26 sell accounts). Other resolved instructions
+in the same transaction still parse. `parse_transaction_dex_events_best_effort`
+explicitly retains legacy discriminator guesses and missing-account placeholders;
+its provisional results do not guarantee gRPC parity.
+
+Obtainable-data parity targets gRPC outer instruction parsing across PumpFun,
+PumpSwap, Pump Fees, Raydium AMM V4/CLMM/CPMM/LaunchLab, Meteora
+Pools/DAMM V2/DLMM and Orca Whirlpool. Creation-buy and Mayhem flags are
+associated with the mint in same-transaction create instructions; PumpSwap
+`is_pump_pool` comes from fee-query arguments. Logs, executed inner CPI,
+balances and execution results are unavailable in raw shreds. See the local
+[parser-parity tool](tools/parser-parity/README.md) for regression coverage and
+its limits. CPMM initialize uses pool account 3 and creator account 0;
+deposit/withdraw use pool account 2 and owner account 0.
+CPMM swaps expose `ix_name`, `amount_in`/`minimum_amount_out` for exact input or
+`max_amount_in`/`amount_out` for exact output, plus payer, authority and user token
+accounts. These wire arguments remain separate from executed
+`input_amount`/`output_amount` and survive gRPC log merging. New fields default
+when deserializing older JSON; Rust struct literals need the new fields or
+`..Default::default()`.
+
+Built-in UDP/Jito DEX subscriptions can also attach an ALT cache using
+`ShredStreamClient::with_address_lookup_resolver`. The callback receives the
+transaction and slot and returns `message::v0::LoadedAddresses` in message
+lookup order. Transactions without lookups do not invoke it. Resolution errors
+or invalid counts/indices skip that transaction while reception continues. The
+callback runs synchronously and should read a prewarmed cache; the caller owns
+address identity and lookup-table state at the supplied slot.
+`client.address_lookup_stats()` reports successful resolutions, resolution failures,
+and ALT transactions received without a resolver. Counts are cumulative and shared
+by client clones. Without a resolver, only instructions with fully resolved static
+keys are emitted.
+
+Orca Whirlpool liquidity instructions use pool account 0 and position account 3
+(legacy) or 5 (V2). Initialization reads config/mints at 0/1/2 and pool at 4
+(legacy) or 6 (V2); legacy arguments begin with a one-byte bump. Both
+initialization versions and V2 liquidity instructions are recognized by their IDL
+discriminators. Legacy initialization uses token program 8 for both mints; V2
+uses programs 10 and 11.
+
+Orca swap events expose `ix_name`, `amount`, `other_amount_threshold`,
+`sqrt_price_limit`, and `amount_specified_is_input` as wire parameters, plus
+`token_authority` and both `token_owner_account_*` addresses. Outer-only parsing
+leaves executed amounts and pre/post prices at zero; thresholds and price limits
+are not execution results. Both gRPC merge paths preserve these parameters while
+keeping log amounts, prices, direction, and fees authoritative. Legacy/V2 account
+layouts follow the instruction discriminator. Added fields default in old JSON
+and do not change the Borsh event layout; struct literals can use
+`..Default::default()`.
+
+Meteora Pools swap events now separate `amount_in` and `minimum_out_amount`
+from executed `in_amount`/`out_amount`. Outer-only parsing leaves execution
+amounts and fees at zero and exposes all 15 IDL accounts, including `pool`,
+user token accounts, vaults, LP accounts, and `protocol_token_fee`. Both gRPC
+merge paths preserve instruction parameters and fill missing account fields
+while keeping log execution values. Added fields default in old JSON; Rust
+struct literals can use `..Default::default()`.
+
+Meteora Pools `add_balance_liquidity`, `add_imbalance_liquidity`, and
+`remove_balance_liquidity` use their current IDL discriminators. Liquidity
+events expose `ix_name`, all 16 instruction accounts, and dedicated wire
+parameters: LP amount and token maxima for balanced deposits, minimum LP
+amount and token inputs for imbalanced deposits, and LP amount plus token
+minima for balanced withdrawals. Outer-only execution quantities remain zero;
+both gRPC merge paths preserve parameters and missing accounts while keeping
+log execution quantities. Old JSON defaults added fields; Rust struct literals
+can use `..Default::default()`. The previous unrelated liquidity discriminators
+are no longer recognized.
+
+Meteora Pools also parses `remove_liquidity_single_side` and
+`bootstrap_liquidity`. Single-side removal retains `pool_token_amount`,
+`minimum_out_amount`, and its 15-account layout with `user_destination_token`;
+it leaves per-side execution amounts unknown. Bootstrap retains both token
+inputs and all 16 accounts while leaving executed LP/token quantities at zero.
+Both gRPC merge paths preserve wire parameters. Account dispatch selects these
+operations by discriminator and known pool rather than account count. New fields
+default in old JSON; struct literals can use `..Default::default()`.
+
+Meteora Pools constant-product initialization with config/config2 uses current
+IDL discriminators and account indices: pool/config/LP mint/token mints at
+0/1/2/3/4. Events expose both token inputs, optional config2 activation point,
+and all 26 accounts. `set_pool_fees` exposes the four fee ratios, partner fee
+numerator, pool, and fee operator. Protocol fee fields use IDL names; historical
+`owner_trade_fee_*` fields remain aliases. Logs populate both names, and gRPC
+merges preserve logged fee ratios plus instruction-only partner/context fields.
+Management account dispatch matches the operation and known pool. The obsolete
+`initialize_pool` discriminator is no longer accepted; `CREATE_POOL` now refers
+to config initialization. New fields default in old JSON.
+
+All six initialization variants in the current Meteora Pools IDL are parsed.
+Permissioned and permissionless initialization retain the full Stable curve
+parameters in `stable_curve`, including token multipliers and depeg state;
+fee-tier initialization retains optional `trade_fee_bps`. Customizable creation
+retains `customizable_params`, including fee numerator, activation settings,
+alpha-vault flag, and all 90 padding bytes. Account filling selects each
+24/25/26-account layout by instruction name, preserving distinct admin/payer
+and fee-owner roles. gRPC merges preserve these parameters, including zero and
+absent optional values. Invalid curve/depeg enums, option tags, bool bytes, and
+truncated argument data are rejected. Added fields default in old JSON.
+
+Raydium AMM V4 legacy/V2 exact-input and exact-output swaps now expose
+`ix_name`, `instruction_amount_in`, and `instruction_amount_out`. Outer-only
+`amount_in`/`amount_out` remain zero until execution data is available;
+`minimum_amount_out`/`max_amount_in` retain wire limits. Both gRPC merge paths
+keep these parameters, including zero values, fill missing account context,
+and retain logged execution amounts. New fields default in old JSON and are
+skipped in Borsh, preserving the program event wire layout. Rust struct literals
+can use `..Default::default()`.
+
+The CPMM creator-fee protocol-share upgrade is supported: collection events
+require the appended PDA/config accounts, AmmConfig exposes
+`creator_fee_share_rate` without changing its 236-byte wire size, and the new
+CreatorFeeShare account is decoded. `cpmm_creator_fee` provides canonical PDA
+derivation, an idempotent upgrade helper for existing collection Instructions,
+and exact integer payout splits. Swap, quote, and LP paths are unchanged.
+See the [migration guide](docs/cpmm-creator-fee-upgrade.md) for account indices,
+API examples, and collection-time rounding.
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
@@ -292,3 +440,16 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ### Telegram group
 
 https://t.me/fnzero_group
+
+### Real mainnet RPC examples
+
+See [examples](examples/README.md) for live RPC fetching, offline replay of eleven captured transactions, and wire/token-balance validation.
+
+
+## Pump upgrade (October 2026)
+
+Compact Pump v3 and PumpSwap v2 trades use their new 17-account layouts. New typed events cover `PumpFunPostCompleteBuy`, `PumpFunComplete`, `PumpFunSweepBondingCurveFee` and `PumpSwapSweepPoolFee`, with program-scoped log and CPI parsing. Historical SOL CompleteEvent payloads remain supported. Curve/pool retained fees and synthetic counters are exposed; optional historical tails default to zero.
+
+For a synthetic completing buy, retain TradeEvent **and** PostCompleteBuyEvent and aggregate execution amounts within the same invocation. CompleteEvent is the completion notification. For `multi_hop_swap`, retain each venue's trade events; different venues are not merged into one fill. The multi-hop intent decoder exposes the fixed user accounts, input/minimum limits and 5 roles per hop; these limits are not actual executed amounts. Streamer forwards the typed events and account fields through its parser bridge (its re-exported `parser_sdk` also provides the intent decoder).
+
+Reference: [pump-public-docs](https://github.com/pump-fun/pump-public-docs/tree/8cda1fa30ea658b20909d8aedf002047119388d2). Validation uses offline official IDL fixtures; no live trade is sent by the tests.

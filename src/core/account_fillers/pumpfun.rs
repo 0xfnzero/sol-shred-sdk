@@ -1,6 +1,9 @@
 //! PumpFun 账户填充模块
 
 use crate::core::events::*;
+use crate::instr::pump::create_layout::{
+    create as create_accounts, create_v2 as create_v2_accounts,
+};
 use solana_sdk::pubkey::Pubkey;
 
 /// 账户获取辅助函数类型
@@ -17,35 +20,6 @@ fn pump_trade_uses_v2_layout(e: &PumpFunTradeEvent, get: &AccountGetter<'_>) -> 
         e.ix_name.as_str(),
         "buy_v2" | "sell_v2" | "buy_exact_quote_in_v2"
     ) || account_at_matches_mint(e, get, 1)
-}
-
-#[inline(always)]
-fn fill_create_v2_quote_accounts_if_appended(
-    quote_mint_to: &mut Pubkey,
-    quote_vault_to: &mut Pubkey,
-    quote_token_program_to: &mut Pubkey,
-    get: &AccountGetter<'_>,
-) {
-    let quote_mint = get(16);
-    let quote_vault = get(17);
-    let quote_token_program = get(18);
-    if quote_mint == Pubkey::default()
-        || quote_mint == crate::instr::program_ids::PUMPFUN_PROGRAM_ID
-        || quote_vault == Pubkey::default()
-        || quote_token_program == Pubkey::default()
-    {
-        return;
-    }
-
-    if *quote_mint_to == Pubkey::default() || is_pumpfun_solscan_sol_quote_mint(*quote_mint_to) {
-        *quote_mint_to = normalize_pumpfun_quote_mint(quote_mint);
-    }
-    if *quote_vault_to == Pubkey::default() {
-        *quote_vault_to = quote_vault;
-    }
-    if *quote_token_program_to == Pubkey::default() {
-        *quote_token_program_to = quote_token_program;
-    }
 }
 
 /// 填充 PumpFun Trade 事件账户
@@ -84,6 +58,28 @@ pub fn fill_trade_accounts(e: &mut PumpFunTradeEvent, get: &AccountGetter<'_>) {
         }
     };
 
+    if get(16) == crate::instr::program_ids::PUMPFUN_PROGRAM_ID
+        && account_at_matches_mint(e, get, 1)
+    {
+        fill_pk(&mut e.global, 0);
+        fill_pk(&mut e.mint, 1);
+        fill_pk(&mut e.quote_mint, 2);
+        fill_pk(&mut e.token_program, 3);
+        fill_pk(&mut e.quote_token_program, 4);
+        fill_pk(&mut e.bonding_curve, 5);
+        fill_pk(&mut e.associated_bonding_curve, 6);
+        fill_pk(&mut e.associated_quote_bonding_curve, 7);
+        fill_pk(&mut e.user, 8);
+        fill_pk(&mut e.associated_user, 9);
+        fill_pk(&mut e.associated_quote_user, 10);
+        fill_pk(&mut e.user_volume_accumulator, 11);
+        fill_pk(&mut e.fee_config, 12);
+        fill_pk(&mut e.buyback_fee_recipient, 13);
+        fill_pk(&mut e.system_program, 14);
+        fill_pk(&mut e.event_authority, 15);
+        fill_pk(&mut e.program, 16);
+        return;
+    }
     if is_v2 {
         fill_pk(&mut e.global, 0);
         fill_pumpfun_quote_mint(&mut e.quote_mint, 2);
@@ -199,37 +195,67 @@ pub fn fill_trade_accounts(e: &mut PumpFunTradeEvent, get: &AccountGetter<'_>) {
 /// 13: program
 pub fn fill_create_accounts(e: &mut PumpFunCreateTokenEvent, get: &AccountGetter<'_>) {
     if e.mint == Pubkey::default() {
-        e.mint = get(0);
+        e.mint = get(create_accounts::MINT);
     }
     if e.bonding_curve == Pubkey::default() {
-        e.bonding_curve = get(2);
+        e.bonding_curve = get(create_accounts::BONDING_CURVE);
     }
     if e.user == Pubkey::default() {
-        e.user = get(7);
+        e.user = get(create_accounts::USER);
     }
     if e.mint_authority == Pubkey::default() {
-        e.mint_authority = get(1);
+        e.mint_authority = get(create_accounts::MINT_AUTHORITY);
     }
     if e.associated_bonding_curve == Pubkey::default() {
-        e.associated_bonding_curve = get(3);
+        e.associated_bonding_curve = get(create_accounts::ASSOCIATED_BONDING_CURVE);
     }
     if e.global == Pubkey::default() {
-        e.global = get(4);
+        e.global = get(create_accounts::GLOBAL);
     }
     if e.system_program == Pubkey::default() {
-        e.system_program = get(8);
+        e.system_program = get(create_accounts::SYSTEM_PROGRAM);
     }
     if e.token_program == Pubkey::default() {
-        e.token_program = get(9);
+        e.token_program = get(create_accounts::TOKEN_PROGRAM);
     }
     if e.associated_token_program == Pubkey::default() {
-        e.associated_token_program = get(10);
+        e.associated_token_program = get(create_accounts::ASSOCIATED_TOKEN_PROGRAM);
     }
     if e.event_authority == Pubkey::default() {
-        e.event_authority = get(12);
+        e.event_authority = get(create_accounts::EVENT_AUTHORITY);
     }
     if e.program == Pubkey::default() {
-        e.program = get(13);
+        e.program = get(create_accounts::PROGRAM);
+    }
+}
+
+/// Only a complete SDK quote tail can enrich an event; execution fields win.
+#[inline(always)]
+fn fill_create_quote_accounts(
+    mint: &mut Pubkey,
+    vault: &mut Pubkey,
+    token: &mut Pubkey,
+    get: &AccountGetter<'_>,
+) {
+    let (quote_mint, quote_vault, quote_token_program) =
+        crate::instr::pump::create_v2_quote_accounts(
+            crate::instr::pump::create_layout::quote_remaining::QUOTE_TOKEN_PROGRAM + 1,
+            |i| Some(get(i)),
+        );
+    if quote_mint == Pubkey::default() {
+        return;
+    }
+    if *mint == Pubkey::default() || is_pumpfun_solscan_sol_quote_mint(*mint) {
+        *mint = quote_mint;
+    }
+    if *mint != quote_mint {
+        return;
+    }
+    if *vault == Pubkey::default() {
+        *vault = quote_vault;
+    }
+    if *token == Pubkey::default() {
+        *token = quote_token_program;
     }
 }
 
@@ -239,57 +265,57 @@ pub fn fill_create_accounts(e: &mut PumpFunCreateTokenEvent, get: &AccountGetter
 /// 3 associated_bonding_curve, 4 global, 5 user, 6 system_program, 7 token_program,
 /// 8 associated_token_program, 9 mayhem_program_id, 10 global_params, 11 sol_vault,
 /// 12 mayhem_state, 13 mayhem_token_vault, 14 event_authority, 15 program.
-/// Quote-pool variant appends: 16 quote_mint, 17 quote_vault, 18 quote_token_program.
+/// Quote remaining accounts follow the official SDK after the fixed IDL account list.
 pub fn fill_create_accounts_from_v2(e: &mut PumpFunCreateTokenEvent, get: &AccountGetter<'_>) {
     if e.mint == Pubkey::default() {
-        e.mint = get(0);
+        e.mint = get(create_v2_accounts::MINT);
     }
     if e.bonding_curve == Pubkey::default() {
-        e.bonding_curve = get(2);
+        e.bonding_curve = get(create_v2_accounts::BONDING_CURVE);
     }
     if e.user == Pubkey::default() {
-        e.user = get(5);
+        e.user = get(create_v2_accounts::USER);
     }
     if e.mint_authority == Pubkey::default() {
-        e.mint_authority = get(1);
+        e.mint_authority = get(create_v2_accounts::MINT_AUTHORITY);
     }
     if e.associated_bonding_curve == Pubkey::default() {
-        e.associated_bonding_curve = get(3);
+        e.associated_bonding_curve = get(create_v2_accounts::ASSOCIATED_BONDING_CURVE);
     }
     if e.global == Pubkey::default() {
-        e.global = get(4);
+        e.global = get(create_v2_accounts::GLOBAL);
     }
     if e.system_program == Pubkey::default() {
-        e.system_program = get(6);
+        e.system_program = get(create_v2_accounts::SYSTEM_PROGRAM);
     }
     if e.token_program == Pubkey::default() {
-        e.token_program = get(7);
+        e.token_program = get(create_v2_accounts::TOKEN_PROGRAM);
     }
     if e.associated_token_program == Pubkey::default() {
-        e.associated_token_program = get(8);
+        e.associated_token_program = get(create_v2_accounts::ASSOCIATED_TOKEN_PROGRAM);
     }
     if e.mayhem_program_id == Pubkey::default() {
-        e.mayhem_program_id = get(9);
+        e.mayhem_program_id = get(create_v2_accounts::MAYHEM_PROGRAM_ID);
     }
     if e.global_params == Pubkey::default() {
-        e.global_params = get(10);
+        e.global_params = get(create_v2_accounts::GLOBAL_PARAMS);
     }
     if e.sol_vault == Pubkey::default() {
-        e.sol_vault = get(11);
+        e.sol_vault = get(create_v2_accounts::SOL_VAULT);
     }
     if e.mayhem_state == Pubkey::default() {
-        e.mayhem_state = get(12);
+        e.mayhem_state = get(create_v2_accounts::MAYHEM_STATE);
     }
     if e.mayhem_token_vault == Pubkey::default() {
-        e.mayhem_token_vault = get(13);
+        e.mayhem_token_vault = get(create_v2_accounts::MAYHEM_TOKEN_VAULT);
     }
     if e.event_authority == Pubkey::default() {
-        e.event_authority = get(14);
+        e.event_authority = get(create_v2_accounts::EVENT_AUTHORITY);
     }
     if e.program == Pubkey::default() {
-        e.program = get(15);
+        e.program = get(create_v2_accounts::PROGRAM);
     }
-    fill_create_v2_quote_accounts_if_appended(
+    fill_create_quote_accounts(
         &mut e.quote_mint,
         &mut e.quote_vault,
         &mut e.quote_token_program,
@@ -303,57 +329,57 @@ pub fn fill_create_accounts_from_v2(e: &mut PumpFunCreateTokenEvent, get: &Accou
 /// 3 associated_bonding_curve, 4 global, 5 user, 6 system_program, 7 token_program,
 /// 8 associated_token_program, 9 mayhem_program_id, 10 global_params, 11 sol_vault,
 /// 12 mayhem_state, 13 mayhem_token_vault, 14 event_authority, 15 program.
-/// Quote-pool variant appends: 16 quote_mint, 17 quote_vault, 18 quote_token_program.
+/// Quote remaining accounts follow the official SDK after the fixed IDL account list.
 pub fn fill_create_v2_accounts(e: &mut PumpFunCreateV2TokenEvent, get: &AccountGetter<'_>) {
     if e.mint == Pubkey::default() {
-        e.mint = get(0);
+        e.mint = get(create_v2_accounts::MINT);
     }
     if e.bonding_curve == Pubkey::default() {
-        e.bonding_curve = get(2);
+        e.bonding_curve = get(create_v2_accounts::BONDING_CURVE);
     }
     if e.user == Pubkey::default() {
-        e.user = get(5);
+        e.user = get(create_v2_accounts::USER);
     }
     if e.mint_authority == Pubkey::default() {
-        e.mint_authority = get(1);
+        e.mint_authority = get(create_v2_accounts::MINT_AUTHORITY);
     }
     if e.associated_bonding_curve == Pubkey::default() {
-        e.associated_bonding_curve = get(3);
+        e.associated_bonding_curve = get(create_v2_accounts::ASSOCIATED_BONDING_CURVE);
     }
     if e.global == Pubkey::default() {
-        e.global = get(4);
+        e.global = get(create_v2_accounts::GLOBAL);
     }
     if e.system_program == Pubkey::default() {
-        e.system_program = get(6);
+        e.system_program = get(create_v2_accounts::SYSTEM_PROGRAM);
     }
     if e.token_program == Pubkey::default() {
-        e.token_program = get(7);
+        e.token_program = get(create_v2_accounts::TOKEN_PROGRAM);
     }
     if e.associated_token_program == Pubkey::default() {
-        e.associated_token_program = get(8);
+        e.associated_token_program = get(create_v2_accounts::ASSOCIATED_TOKEN_PROGRAM);
     }
     if e.mayhem_program_id == Pubkey::default() {
-        e.mayhem_program_id = get(9);
+        e.mayhem_program_id = get(create_v2_accounts::MAYHEM_PROGRAM_ID);
     }
     if e.global_params == Pubkey::default() {
-        e.global_params = get(10);
+        e.global_params = get(create_v2_accounts::GLOBAL_PARAMS);
     }
     if e.sol_vault == Pubkey::default() {
-        e.sol_vault = get(11);
+        e.sol_vault = get(create_v2_accounts::SOL_VAULT);
     }
     if e.mayhem_state == Pubkey::default() {
-        e.mayhem_state = get(12);
+        e.mayhem_state = get(create_v2_accounts::MAYHEM_STATE);
     }
     if e.mayhem_token_vault == Pubkey::default() {
-        e.mayhem_token_vault = get(13);
+        e.mayhem_token_vault = get(create_v2_accounts::MAYHEM_TOKEN_VAULT);
     }
     if e.event_authority == Pubkey::default() {
-        e.event_authority = get(14);
+        e.event_authority = get(create_v2_accounts::EVENT_AUTHORITY);
     }
     if e.program == Pubkey::default() {
-        e.program = get(15);
+        e.program = get(create_v2_accounts::PROGRAM);
     }
-    fill_create_v2_quote_accounts_if_appended(
+    fill_create_quote_accounts(
         &mut e.quote_mint,
         &mut e.quote_vault,
         &mut e.quote_token_program,
@@ -368,6 +394,24 @@ pub fn fill_migrate_accounts(_e: &mut PumpFunMigrateEvent, _get: &AccountGetter<
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn create_v2_filler_preserves_authoritative_quote_fields() {
+        let quote = Pubkey::new_unique();
+        let vault = Pubkey::new_unique();
+        let token = Pubkey::new_unique();
+        let mut e = PumpFunCreateTokenEvent {
+            quote_mint: quote,
+            quote_vault: vault,
+            quote_token_program: token,
+            ..Default::default()
+        };
+        fill_create_accounts_from_v2(&mut e, &|_| Pubkey::new_unique());
+        assert_eq!(
+            (e.quote_mint, e.quote_vault, e.quote_token_program),
+            (quote, vault, token)
+        );
+    }
+
     use super::*;
 
     #[test]
@@ -443,7 +487,7 @@ mod tests {
     fn fill_create_accounts_from_v2_sets_appended_quote_accounts_only_when_tail_exists() {
         let quote_mint = PUMPFUN_WSOL_QUOTE_MINT;
         let quote_vault = Pubkey::new_from_array([17u8; 32]);
-        let quote_token_program = Pubkey::new_from_array([18u8; 32]);
+        let quote_token_program = crate::accounts::program_ids::SPL_TOKEN_PROGRAM_ID;
         let get_with_tail = |i: usize| -> Pubkey {
             match i {
                 16 => quote_mint,

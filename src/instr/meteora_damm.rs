@@ -15,6 +15,14 @@ pub mod discriminators {
     pub const CLOSE_POSITION_LOG: [u8; 8] = [20, 145, 144, 68, 143, 142, 214, 178];
     pub const ADD_LIQUIDITY_LOG: [u8; 8] = [175, 242, 8, 157, 30, 247, 185, 169];
     pub const REMOVE_LIQUIDITY_LOG: [u8; 8] = [87, 46, 88, 98, 175, 96, 34, 91];
+    pub const CLAIM_POSITION_FEE_LOG: [u8; 8] =
+        crate::logs::meteora_damm::discriminators::CLAIM_POSITION_FEE_EVENT;
+    pub const INITIALIZE_REWARD_LOG: [u8; 8] =
+        crate::logs::meteora_damm::discriminators::INITIALIZE_REWARD_EVENT;
+    pub const FUND_REWARD_LOG: [u8; 8] =
+        crate::logs::meteora_damm::discriminators::FUND_REWARD_EVENT;
+    pub const CLAIM_REWARD_LOG: [u8; 8] =
+        crate::logs::meteora_damm::discriminators::CLAIM_REWARD_EVENT;
     pub const INITIALIZE_POOL: [u8; 8] = [95, 180, 10, 172, 84, 174, 232, 40];
 }
 
@@ -57,6 +65,27 @@ pub fn parse_instruction(
 
     let cpi_discriminator: [u8; 8] = instruction_data[8..16].try_into().ok()?;
     let cpi_data = &instruction_data[16..];
+
+    // The fee/reward events use the same complete body decoder in every path.
+    let is_fee_or_reward = matches!(
+        cpi_discriminator,
+        discriminators::CLAIM_POSITION_FEE_LOG
+            | discriminators::INITIALIZE_REWARD_LOG
+            | discriminators::FUND_REWARD_LOG
+            | discriminators::CLAIM_REWARD_LOG
+    );
+    if is_fee_or_reward {
+        let full_disc: [u8; 16] = instruction_data[..16].try_into().ok()?;
+        let metadata = crate::logs::utils::create_metadata_simple(
+            signature,
+            slot,
+            tx_index,
+            block_time_us,
+            PROGRAM_ID_PUBKEY,
+            grpc_recv_us,
+        );
+        return crate::instr::all_inner::meteora_damm::parse(&full_disc, cpi_data, metadata);
+    }
 
     match cpi_discriminator {
         discriminators::SWAP_LOG => parse_swap_log_instruction(

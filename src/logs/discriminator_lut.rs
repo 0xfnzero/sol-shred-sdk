@@ -354,7 +354,6 @@ macro_rules! disc_entry {
 ///
 /// Expected latency: 3–8 ns (binary search on 33 discriminators ⇒ at most 6 comparisons)
 pub const DISCRIMINATOR_LUT: &[DiscriminatorInfo] = &[
-    // 按 discriminator 数值升序（binary_search 要求）
     disc_entry!(
         0x0100000000000000,
         "Raydium AMM Initialize2",
@@ -379,6 +378,7 @@ pub const DISCRIMINATOR_LUT: &[DiscriminatorInfo] = &[
         parse_raydium_amm_withdraw,
         Protocol::RaydiumAmm
     ),
+    disc_entry!(619296439455019615, "PUMPFUN_COMPLETE", parse_pumpfun_complete, Protocol::PumpFun),
     disc_entry!(
         0x0900000000000000,
         "Raydium AMM Swap Base In",
@@ -397,19 +397,24 @@ pub const DISCRIMINATOR_LUT: &[DiscriminatorInfo] = &[
         parse_raydium_amm_swap_base_out,
         Protocol::RaydiumAmm
     ),
-    // Raydium CPMM events
     disc_entry!(
         0x22A16D949C4612B7,
         "Raydium CPMM Withdraw",
         parse_raydium_cpmm_withdraw,
         Protocol::RaydiumCpmm
     ),
-    // PumpSwap events
     disc_entry!(
         0x2ADC03A50A372F3E,
         "PumpSwap Sell",
         parse_pumpswap_sell,
         Protocol::PumpSwap
+    ),
+    disc_entry!(3118876958563052404, "PUMPFUN_SWEEP_BONDING_CURVE_FEE", parse_pumpfun_sweep_bonding_curve_fee, Protocol::PumpFun),
+    disc_entry!(
+        0x38310C6134B7B6C6_u64,
+        "Meteora DAMM V2 ClaimPositionFee",
+        crate::logs::meteora_damm::parse_claim_position_fee_from_data,
+        Protocol::MeteoraDamm
     ),
     disc_entry!(
         0x385532443A56DE3A,
@@ -417,12 +422,17 @@ pub const DISCRIMINATOR_LUT: &[DiscriminatorInfo] = &[
         parse_raydium_clmm_decrease_liquidity,
         Protocol::RaydiumClmm
     ),
-    // Meteora AMM events
     disc_entry!(
         0x3A981F67E861F474,
         "Meteora AMM Remove Liquidity",
         parse_meteora_amm_remove_liquidity,
         Protocol::MeteoraAmm
+    ),
+    disc_entry!(
+        0x3C75DA39C9CDA379_u64,
+        "Raydium CPMM LP Change",
+        crate::logs::raydium_cpmm::parse_lp_change_from_data,
+        Protocol::RaydiumCpmm
     ),
     disc_entry!(
         0x3DD5292D4F1157CE,
@@ -455,6 +465,12 @@ pub const DISCRIMINATOR_LUT: &[DiscriminatorInfo] = &[
         Protocol::RaydiumClmm
     ),
     disc_entry!(
+        0x5579BFC77AEDE968_u64,
+        "Meteora DAMM V2 FundReward",
+        crate::logs::meteora_damm::parse_fund_reward_from_data,
+        Protocol::MeteoraDamm
+    ),
+    disc_entry!(
         0x58FB74B8C8AA6985_u64,
         "Pump Fees Create Fee Sharing Config",
         parse_pumpfun_create_fee_sharing_config,
@@ -472,7 +488,6 @@ pub const DISCRIMINATOR_LUT: &[DiscriminatorInfo] = &[
         parse_raydium_clmm_liquidity_change,
         Protocol::RaydiumClmm
     ),
-    // PumpSwap and PumpFun events
     disc_entry!(
         0x74A776A0D20C31B1,
         "PumpSwap Create Pool",
@@ -539,6 +554,7 @@ pub const DISCRIMINATOR_LUT: &[DiscriminatorInfo] = &[
         parse_raydium_clmm_decrease_limit_order,
         Protocol::RaydiumClmm
     ),
+    disc_entry!(11927646055507993730, "PUMPSWAP_SWEEP_POOL_FEE", parse_pumpswap_sweep_pool_fee, Protocol::PumpSwap),
     disc_entry!(
         0xADB44AA35662D937,
         "Raydium CPMM Swap Base Out",
@@ -630,6 +646,12 @@ pub const DISCRIMINATOR_LUT: &[DiscriminatorInfo] = &[
         Protocol::OrcaWhirlpool
     ),
     disc_entry!(
+        0xE7D7BCEBC89356DA_u64,
+        "Meteora DAMM V2 ClaimReward",
+        crate::logs::meteora_damm::parse_claim_reward_from_data,
+        Protocol::MeteoraDamm
+    ),
+    disc_entry!(
         0xEA423FF657AB98E1_u64,
         "Pump Fees Update Admin",
         parse_pumpfees_update_admin,
@@ -665,6 +687,13 @@ pub const DISCRIMINATOR_LUT: &[DiscriminatorInfo] = &[
         parse_meteora_amm_bootstrap_liquidity,
         Protocol::MeteoraAmm
     ),
+    disc_entry!(
+        0xF9B934F603BC5B81_u64,
+        "Meteora DAMM V2 InitializeReward",
+        crate::logs::meteora_damm::parse_initialize_reward_from_data,
+        Protocol::MeteoraDamm
+    ),
+    disc_entry!(18146529233607700591, "PUMPFUN_POST_COMPLETE_BUY", parse_pumpfun_post_complete_buy, Protocol::PumpFun),
 ];
 
 /// Fast lookup by discriminator - O(log n) binary search
@@ -768,3 +797,11 @@ mod tests {
         );
     }
 }
+
+fn parse_pumpfun_post_complete_buy(data:&[u8],metadata:EventMetadata)->Option<DexEvent>{crate::logs::pump_upgrade::parse(18146529233607700591,data,metadata,None)}
+
+fn parse_pumpfun_sweep_bonding_curve_fee(data:&[u8],metadata:EventMetadata)->Option<DexEvent>{crate::logs::pump_upgrade::parse(3118876958563052404,data,metadata,None)}
+
+fn parse_pumpfun_complete(data:&[u8],metadata:EventMetadata)->Option<DexEvent>{crate::logs::pump_upgrade::parse(619296439455019615,data,metadata,None)}
+
+fn parse_pumpswap_sweep_pool_fee(data:&[u8],metadata:EventMetadata)->Option<DexEvent>{crate::logs::pump_upgrade::parse(11927646055507993730,data,metadata,None)}

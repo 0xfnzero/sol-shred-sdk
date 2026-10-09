@@ -8,6 +8,7 @@ use solana_sdk::{pubkey::Pubkey, signature::Signature};
 
 /// Raydium CPMM discriminator 常量
 pub mod discriminators {
+    pub const LP_CHANGE_EVENT: [u8; 8] = [121, 163, 205, 201, 57, 218, 117, 60];
     pub const SWAP_EVENT: [u8; 8] = [64, 198, 205, 232, 38, 8, 113, 226];
     pub const SWAP_BASE_IN: [u8; 8] = [143, 190, 90, 218, 196, 30, 51, 222];
     pub const SWAP_BASE_OUT: [u8; 8] = [55, 217, 98, 86, 163, 74, 180, 173];
@@ -57,6 +58,9 @@ fn parse_structured_log(
     let data = &program_data[8..];
 
     match discriminator {
+        discriminators::LP_CHANGE_EVENT => parse_lp_change_from_data(data, create_metadata_simple(
+            signature, slot, tx_index, block_time_us, Pubkey::default(), grpc_recv_us,
+        )),
         discriminators::SWAP_EVENT => parse_swap_event_from_data(
             data,
             create_metadata_simple(
@@ -91,10 +95,34 @@ fn parse_structured_log(
 // Public from_data parsers - Accept pre-decoded data, eliminate double decode
 // =============================================================================
 
+/// Decode the exact official executed LP change body; shared by logs and CPI.
+#[inline(always)]
+pub fn parse_lp_change_from_data(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
+    if data.len() != 89 || data[88] > 1 {
+        return None;
+    }
+    Some(DexEvent::RaydiumCpmmLpChange(RaydiumCpmmLpChangeEvent {
+        metadata,
+        pool_id: read_pubkey(data, 0)?,
+        lp_amount_before: read_u64_le(data, 32)?,
+        token_0_vault_before: read_u64_le(data, 40)?,
+        token_1_vault_before: read_u64_le(data, 48)?,
+        token_0_amount: read_u64_le(data, 56)?,
+        token_1_amount: read_u64_le(data, 64)?,
+        token_0_transfer_fee: read_u64_le(data, 72)?,
+        token_1_transfer_fee: read_u64_le(data, 80)?,
+        change_type: data[88],
+    }))
+}
+
 /// Parse the stable prefix of the current Anchor `SwapEvent` payload.
 #[inline(always)]
 pub fn parse_swap_event_from_data(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
-    if data.len() < 32 + (6 * 8) + 1 {
+    if data.len() < 81
+        || (data.len() > 81 && data.len() < 162)
+        || data[80] > 1
+        || (data.len() >= 162 && data[161] > 1)
+    {
         return None;
     }
     let mut offset = 0;
@@ -115,6 +143,27 @@ pub fn parse_swap_event_from_data(data: &[u8], metadata: EventMetadata) -> Optio
     let base_input = read_bool(data, offset)?;
 
     Some(DexEvent::RaydiumCpmmSwap(RaydiumCpmmSwapEvent {
+        input_mint: if data.len() >= 162 {
+            read_pubkey(data, 81)?
+        } else {
+            Pubkey::default()
+        },
+        output_mint: if data.len() >= 162 {
+            read_pubkey(data, 113)?
+        } else {
+            Pubkey::default()
+        },
+        trade_fee: if data.len() >= 162 {
+            read_u64_le(data, 145)?
+        } else {
+            0
+        },
+        creator_fee: if data.len() >= 162 {
+            read_u64_le(data, 153)?
+        } else {
+            0
+        },
+        creator_fee_on_input: data.len() >= 162 && data[161] != 0,
         metadata,
         pool_id,
         input_vault_before,
@@ -124,6 +173,7 @@ pub fn parse_swap_event_from_data(data: &[u8], metadata: EventMetadata) -> Optio
         input_transfer_fee,
         output_transfer_fee,
         base_input,
+        ..Default::default()
     }))
 }
 
@@ -159,6 +209,7 @@ pub fn parse_swap_base_in_from_data(data: &[u8], metadata: EventMetadata) -> Opt
         input_transfer_fee: 0,
         output_transfer_fee: 0,
         base_input: is_base_input,
+        ..Default::default()
     }))
 }
 
@@ -194,6 +245,7 @@ pub fn parse_swap_base_out_from_data(data: &[u8], metadata: EventMetadata) -> Op
         input_transfer_fee: 0,
         output_transfer_fee: 0,
         base_input: !is_base_output,
+        ..Default::default()
     }))
 }
 
@@ -337,22 +389,7 @@ fn parse_swap_base_in_event(
         input_transfer_fee: 0,  // 需要从日志数据解析
         output_transfer_fee: 0, // 需要从日志数据解析
         base_input: is_base_input,
-        // 暂时注释，以后会用，AI禁止改动
-        // 指令参数字段
-        // amount_in,
-        // minimum_amount_out,
-
-        // 指令账户字段 - 从account_filler填充
-        // payer: user,
-        // authority: Pubkey::default(),
-        // amm_config: Pubkey::default(),
-        // pool_state,
-        // input_token_account: Pubkey::default(),
-        // output_token_account: Pubkey::default(),
-        // input_vault: Pubkey::default(),
-        // output_vault: Pubkey::default(),
-        // input_token_mint: Pubkey::default(),
-        // output_token_mint: Pubkey::default(),
+        ..Default::default()
     }))
 }
 
@@ -405,22 +442,7 @@ fn parse_swap_base_out_event(
         input_transfer_fee: 0,  // 需要从日志数据解析
         output_transfer_fee: 0, // 需要从日志数据解析
         base_input: !is_base_output,
-        // 暂时注释，以后会用，AI禁止改动
-        // 指令参数字段
-        // amount_in: maximum_amount_in,
-        // minimum_amount_out: amount_out,
-
-        // 指令账户字段 - 从account_filler填充
-        // payer: user,
-        // authority: Pubkey::default(),
-        // amm_config: Pubkey::default(),
-        // pool_state,
-        // input_token_account: Pubkey::default(),
-        // output_token_account: Pubkey::default(),
-        // input_vault: Pubkey::default(),
-        // output_vault: Pubkey::default(),
-        // input_token_mint: Pubkey::default(),
-        // output_token_mint: Pubkey::default(),
+        ..Default::default()
     }))
 }
 
@@ -670,22 +692,7 @@ fn parse_swap_base_in_from_text(
         input_transfer_fee: 0,
         output_transfer_fee: 0,
         base_input: true,
-        // 暂时注释，以后会用，AI禁止改动
-        // 指令参数字段
-        // amount_in: extract_number_from_text(log, "amount_in").unwrap_or(1_000_000_000),
-        // minimum_amount_out: extract_number_from_text(log, "amount_out").unwrap_or(950_000_000),
-
-        // 指令账户字段
-        // payer: Pubkey::default(),
-        // authority: Pubkey::default(),
-        // amm_config: Pubkey::default(),
-        // pool_state: Pubkey::default(),
-        // input_token_account: Pubkey::default(),
-        // output_token_account: Pubkey::default(),
-        // input_vault: Pubkey::default(),
-        // output_vault: Pubkey::default(),
-        // input_token_mint: Pubkey::default(),
-        // output_token_mint: Pubkey::default(),
+        ..Default::default()
     }))
 }
 
@@ -721,22 +728,7 @@ fn parse_swap_base_out_from_text(
         input_transfer_fee: 0,
         output_transfer_fee: 0,
         base_input: false,
-        // 暂时注释，以后会用，AI禁止改动
-        // 指令参数字段
-        // amount_in: extract_number_from_text(log, "amount_in").unwrap_or(1_000_000_000),
-        // minimum_amount_out: extract_number_from_text(log, "amount_out").unwrap_or(950_000_000),
-
-        // 指令账户字段
-        // payer: Pubkey::default(),
-        // authority: Pubkey::default(),
-        // amm_config: Pubkey::default(),
-        // pool_state: Pubkey::default(),
-        // input_token_account: Pubkey::default(),
-        // output_token_account: Pubkey::default(),
-        // input_vault: Pubkey::default(),
-        // output_vault: Pubkey::default(),
-        // input_token_mint: Pubkey::default(),
-        // output_token_mint: Pubkey::default(),
+        ..Default::default()
     }))
 }
 
@@ -857,5 +849,39 @@ mod tests {
         assert_eq!(event.input_transfer_fee, 5);
         assert_eq!(event.output_transfer_fee, 6);
         assert!(event.base_input);
+    }
+}
+
+#[cfg(test)]
+mod current_suffix_tests {
+    use super::*;
+    #[test]
+    fn current_fees_and_legacy_prefix() {
+        let mut b = vec![0u8; 162];
+        b[81..113].fill(1);
+        b[113..145].fill(2);
+        b[145..153].copy_from_slice(&9007199254740993u64.to_le_bytes());
+        b[153..161].copy_from_slice(&77u64.to_le_bytes());
+        b[161] = 1;
+        let DexEvent::RaydiumCpmmSwap(e) =
+            parse_swap_event_from_data(&b, EventMetadata::default()).unwrap()
+        else {
+            panic!("variant")
+        };
+        assert_eq!(e.trade_fee, 9007199254740993);
+        assert_eq!(e.creator_fee, 77);
+        assert!(e.creator_fee_on_input);
+        assert_ne!(e.input_mint, e.output_mint);
+        assert!(parse_swap_event_from_data(&b[..81], EventMetadata::default()).is_some());
+        for n in 0..162 {
+            if n != 81 {
+                assert!(
+                    parse_swap_event_from_data(&b[..n], EventMetadata::default()).is_none(),
+                    "length {n}"
+                );
+            }
+        }
+        b[161] = 2;
+        assert!(parse_swap_event_from_data(&b, EventMetadata::default()).is_none());
     }
 }

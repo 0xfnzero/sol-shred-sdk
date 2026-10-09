@@ -1,6 +1,7 @@
 use crate::core::events::{DexEvent, EventMetadata};
 
 pub mod discriminators {
+    pub const LP_CHANGE_EVENT: [u8; 16] = [228, 69, 165, 46, 81, 203, 154, 29, 121, 163, 205, 201, 57, 218, 117, 60];
     pub const SWAP_BASE_IN: [u8; 16] = [
         143, 190, 90, 218, 196, 30, 51, 222, 155, 167, 108, 32, 122, 76, 173, 64,
     ];
@@ -21,6 +22,7 @@ pub mod discriminators {
 #[inline]
 pub fn parse(disc: &[u8; 16], data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
     match *disc {
+        discriminators::LP_CHANGE_EVENT => crate::logs::raydium_cpmm::parse_lp_change_from_data(data, metadata),
         discriminators::SWAP_BASE_IN => {
             crate::logs::raydium_cpmm::parse_swap_base_in_from_data(data, metadata)
         }

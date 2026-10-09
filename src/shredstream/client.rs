@@ -6,7 +6,7 @@ use std::time::Duration;
 use crossbeam_queue::ArrayQueue;
 use futures::StreamExt;
 use solana_entry::entry::Entry;
-use solana_sdk::message::VersionedMessage;
+use solana_sdk::message::{v0::LoadedAddresses, VersionedMessage};
 use solana_sdk::transaction::VersionedTransaction;
 use tokio::task::JoinHandle;
 use tonic::transport::{Channel, Endpoint};
@@ -68,10 +68,51 @@ fn record_dropped_event() {
     }
 }
 
+/// ALT resolution counters for one client's built-in DEX subscriptions.
+/// Counts accumulate across reconnects and subscriptions; cloned clients share them.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AddressLookupStats {
+    pub resolved_transactions: u64,
+    /// Resolver errors and invalid resolved address counts/indices.
+    pub resolution_failures: u64,
+    /// ALT transactions seen without a resolver. Fully static instructions can still emit.
+    pub transactions_without_resolver: u64,
+}
+
+#[derive(Default)]
+struct AddressLookupCounters {
+    resolved_transactions: AtomicU64,
+    resolution_failures: AtomicU64,
+    transactions_without_resolver: AtomicU64,
+}
+
+impl AddressLookupCounters {
+    fn snapshot(&self) -> AddressLookupStats {
+        AddressLookupStats {
+            resolved_transactions: self.resolved_transactions.load(Ordering::Relaxed),
+            resolution_failures: self.resolution_failures.load(Ordering::Relaxed),
+            transactions_without_resolver: self
+                .transactions_without_resolver
+                .load(Ordering::Relaxed),
+        }
+    }
+}
+
+/// Resolve a transaction's ALT addresses in message lookup order.
+///
+/// Called synchronously in the receive task, only for V0 transactions with
+/// lookups. Use a slot-aware, prewarmed cache; blocking RPC delays reception.
+/// An error or invalid address counts/indices skips that transaction. Address
+/// identity and lookup-table activation at the supplied slot are the caller's responsibility.
+pub type AddressLookupResolver =
+    dyn Fn(&VersionedTransaction, u64) -> AnyResult<LoadedAddresses> + Send + Sync;
+
 /// High-level multi-source shred subscription client.
 #[derive(Clone)]
 pub struct ShredStreamClient {
     config: ShredStreamConfig,
+    address_lookup_resolver: Option<Arc<AddressLookupResolver>>,
+    address_lookup_counters: Arc<AddressLookupCounters>,
     subscription: Arc<SubscriptionState>,
 }
 
@@ -110,10 +151,27 @@ impl ShredStreamClient {
     pub async fn new_with_config(config: ShredStreamConfig) -> AnyResult<Self> {
         Ok(Self {
             config,
+            address_lookup_resolver: None,
+            address_lookup_counters: Arc::new(AddressLookupCounters::default()),
             subscription: Arc::new(SubscriptionState {
                 handle: Mutex::new(None),
             }),
         })
+    }
+
+    /// Use caller-resolved ALT addresses for built-in DEX subscriptions from
+    /// either raw UDP or Jito entries. Configure before subscribing.
+    pub fn with_address_lookup_resolver<F>(mut self, resolver: F) -> Self
+    where
+        F: Fn(&VersionedTransaction, u64) -> AnyResult<LoadedAddresses> + Send + Sync + 'static,
+    {
+        self.address_lookup_resolver = Some(Arc::new(resolver));
+        self
+    }
+
+    /// Snapshot ALT resolution for this client's built-in DEX subscriptions.
+    pub fn address_lookup_stats(&self) -> AddressLookupStats {
+        self.address_lookup_counters.snapshot()
     }
 
     /// Subscribe to all supported DEX events and return a lock-free queue.
@@ -256,6 +314,8 @@ impl ShredStreamClient {
         sink: EventSink<DexEvent>,
     ) -> AnyResult<()> {
         let config = self.config.clone();
+        let resolver = self.address_lookup_resolver.clone();
+        let stats = Arc::clone(&self.address_lookup_counters);
         let previous = {
             let mut guard = self
                 .subscription
@@ -263,7 +323,7 @@ impl ShredStreamClient {
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             let handle = tokio::spawn(async move {
-                run_dex_with_restarts(config, event_type_filter, sink).await;
+                run_dex_with_restarts(config, event_type_filter, sink, resolver, stats).await;
             });
             guard.replace(handle)
         };
@@ -279,11 +339,21 @@ async fn run_dex_with_restarts(
     config: ShredStreamConfig,
     event_type_filter: Option<EventTypeFilter>,
     sink: EventSink<DexEvent>,
+    resolver: Option<Arc<AddressLookupResolver>>,
+    stats: Arc<AddressLookupCounters>,
 ) {
     let mut restart_attempts = 0u32;
 
     loop {
-        match run_dex_once(&config, event_type_filter.as_ref(), sink.clone()).await {
+        match run_dex_once(
+            &config,
+            event_type_filter.as_ref(),
+            sink.clone(),
+            resolver.as_deref(),
+            &stats,
+        )
+        .await
+        {
             Ok(()) => {
                 restart_attempts = 0;
             }
@@ -313,12 +383,16 @@ async fn run_dex_once(
     config: &ShredStreamConfig,
     event_type_filter: Option<&EventTypeFilter>,
     sink: EventSink<DexEvent>,
+    resolver: Option<&AddressLookupResolver>,
+    stats: &AddressLookupCounters,
 ) -> AnyResult<()> {
     match &config.decode_mode {
         ShredDecodeMode::RawUdp(raw) => {
-            run_raw_dex_once(raw.clone(), event_type_filter, sink).await
+            run_raw_dex_once(raw.clone(), event_type_filter, sink, resolver, stats).await
         }
-        ShredDecodeMode::JitoGrpc(jito) => run_jito_dex_once(jito, event_type_filter, sink).await,
+        ShredDecodeMode::JitoGrpc(jito) => {
+            run_jito_dex_once(jito, event_type_filter, sink, resolver, stats).await
+        }
     }
 }
 
@@ -326,13 +400,24 @@ async fn run_raw_dex_once(
     raw: RawShredConfig,
     event_type_filter: Option<&EventTypeFilter>,
     sink: EventSink<DexEvent>,
+    resolver: Option<&AddressLookupResolver>,
+    stats: &AddressLookupCounters,
 ) -> AnyResult<()> {
     let mut client = RawShredClient::bind(raw)
         .await
         .map_err(|error| anyhow::anyhow!(error.to_string()))?;
     let mut events = Vec::with_capacity(4);
     client
-        .run_entries(|batch| process_dex_entry_batch(batch, event_type_filter, &sink, &mut events))
+        .run_entries(|batch| {
+            process_dex_entry_batch(
+                batch,
+                event_type_filter,
+                &sink,
+                &mut events,
+                resolver,
+                stats,
+            )
+        })
         .await
         .map_err(|error| anyhow::anyhow!(error.to_string()))?;
     Ok(())
@@ -342,6 +427,8 @@ async fn run_jito_dex_once(
     jito: &JitoShredStreamConfig,
     event_type_filter: Option<&EventTypeFilter>,
     sink: EventSink<DexEvent>,
+    resolver: Option<&AddressLookupResolver>,
+    stats: &AddressLookupCounters,
 ) -> AnyResult<()> {
     let mut client = connect_jito(jito).await?;
     let request = tonic::Request::new(SubscribeEntriesRequest {});
@@ -367,6 +454,8 @@ async fn run_jito_dex_once(
             event_type_filter,
             &sink,
             &mut events,
+            resolver,
+            stats,
         );
     }
 
@@ -379,6 +468,8 @@ fn process_dex_entry_batch(
     event_type_filter: Option<&EventTypeFilter>,
     sink: &EventSink<DexEvent>,
     events: &mut Vec<DexEvent>,
+    resolver: Option<&AddressLookupResolver>,
+    stats: &AddressLookupCounters,
 ) {
     let recv_us = now_micros();
     let mut tx_index = 0u64;
@@ -394,6 +485,8 @@ fn process_dex_entry_batch(
                 event_type_filter,
                 events,
                 sink,
+                resolver,
+                stats,
             );
             tx_index += 1;
         }
@@ -409,14 +502,18 @@ fn process_dex_transaction(
     event_type_filter: Option<&EventTypeFilter>,
     events: &mut Vec<DexEvent>,
     sink: &EventSink<DexEvent>,
+    resolver: Option<&AddressLookupResolver>,
+    stats: &AddressLookupCounters,
 ) {
-    parse_dex_transaction_events(
+    parse_dex_transaction_events_with_resolver(
         transaction,
         slot,
         tx_index,
         recv_us,
         event_type_filter,
         events,
+        resolver,
+        stats,
     );
 
     for event in events.drain(..) {
@@ -425,13 +522,15 @@ fn process_dex_transaction(
 }
 
 #[inline]
-fn parse_dex_transaction_events(
+fn parse_dex_transaction_events_with_resolver(
     transaction: &VersionedTransaction,
     slot: u64,
     tx_index: u64,
     recv_us: i64,
     event_type_filter: Option<&EventTypeFilter>,
     events: &mut Vec<DexEvent>,
+    resolver: Option<&AddressLookupResolver>,
+    stats: &AddressLookupCounters,
 ) {
     if transaction.signatures.is_empty() {
         return;
@@ -440,9 +539,35 @@ fn parse_dex_transaction_events(
     let signature = transaction.signatures[0];
     if let VersionedMessage::V0(message) = &transaction.message {
         if !message.address_table_lookups.is_empty() {
+            if let Some(resolver) = resolver {
+                let result = resolver(transaction, slot).and_then(|addresses| {
+                    super::dex::parse_transaction_dex_events_with_loaded_addresses(
+                        transaction,
+                        &addresses.writable,
+                        &addresses.readonly,
+                        signature,
+                        slot,
+                        tx_index,
+                        recv_us,
+                        event_type_filter,
+                        events,
+                    )
+                });
+                if let Err(error) = result {
+                    stats.resolution_failures.fetch_add(1, Ordering::Relaxed);
+                    log::debug!(target: "sol_shred_sdk::shredstream", "skipping unresolved ALT transaction signature={signature} slot={slot}: {error}");
+                } else {
+                    stats.resolved_transactions.fetch_add(1, Ordering::Relaxed);
+                }
+                return;
+            }
+
+            stats
+                .transactions_without_resolver
+                .fetch_add(1, Ordering::Relaxed);
             log::trace!(
                 target: "sol_shred_sdk::shredstream",
-                "V0 tx uses address lookup tables; raw shred parser uses static accounts and default placeholders for ALT-loaded accounts"
+                "V0 tx has no ALT resolver; only instructions with fully resolved static keys will be parsed"
             );
         }
     }
@@ -456,13 +581,6 @@ fn parse_dex_transaction_events(
         event_type_filter,
         events,
     );
-    crate::core::pumpfun_fee_enrich::enrich_pumpfun_same_tx_post_merge(events);
-
-    for event in events.iter_mut() {
-        if let Some(metadata) = event.metadata_mut() {
-            metadata.grpc_recv_us = recv_us;
-        }
-    }
 }
 
 async fn run_with_restarts<P>(config: ShredStreamConfig, mut parser: P, sink: EventSink<P::Event>)
@@ -653,6 +771,8 @@ mod tests {
         runtime.block_on(async {
             let client = ShredStreamClient {
                 config: ShredStreamConfig::default(),
+                address_lookup_resolver: None,
+                address_lookup_counters: Arc::new(AddressLookupCounters::default()),
                 subscription: Arc::new(SubscriptionState {
                     handle: Mutex::new(None),
                 }),
@@ -693,21 +813,192 @@ mod tests {
                     num_readonly_signed_accounts: 0,
                     num_readonly_unsigned_accounts: 0,
                 },
-                account_keys: vec![
-                    RAYDIUM_CPMM_PROGRAM_ID,
-                    Pubkey::new_unique(),
-                    Pubkey::new_unique(),
-                    Pubkey::new_unique(),
-                    Pubkey::new_unique(),
-                ],
+                account_keys: std::iter::once(RAYDIUM_CPMM_PROGRAM_ID)
+                    .chain((0..13).map(|_| Pubkey::new_unique()))
+                    .collect(),
                 recent_blockhash: Hash::default(),
                 instructions: vec![CompiledInstruction::new_from_raw_parts(
                     0,
                     raydium_cpmm_swap_data(),
-                    vec![1, 2, 3, 4],
+                    (1..14).collect(),
                 )],
                 address_table_lookups: Vec::new(),
             }),
+        }
+    }
+
+    fn cpmm_alt_transaction() -> (VersionedTransaction, LoadedAddresses) {
+        let accounts: Vec<_> = (0..13).map(|_| Pubkey::new_unique()).collect();
+        let addresses = LoadedAddresses {
+            writable: accounts[1..].to_vec(),
+            readonly: vec![RAYDIUM_CPMM_PROGRAM_ID],
+        };
+        let tx = VersionedTransaction {
+            signatures: vec![Signature::default()],
+            message: VersionedMessage::V0(v0::Message {
+                header: MessageHeader {
+                    num_required_signatures: 1,
+                    ..Default::default()
+                },
+                account_keys: vec![accounts[0]],
+                recent_blockhash: Hash::new_from_array([9; 32]),
+                instructions: vec![CompiledInstruction::new_from_raw_parts(
+                    13,
+                    raydium_cpmm_swap_data(),
+                    (0..13).collect(),
+                )],
+                address_table_lookups: vec![v0::MessageAddressTableLookup {
+                    account_key: Pubkey::new_unique(),
+                    writable_indexes: (0..12).collect(),
+                    readonly_indexes: vec![12],
+                }],
+            }),
+        };
+        (tx, addresses)
+    }
+
+    #[test]
+    fn dex_subscription_resolves_loaded_program_and_accounts_and_keeps_filter() {
+        let (tx, addresses) = cpmm_alt_transaction();
+        let expected_pool = addresses.writable[2];
+        let expected_input_mint = addresses.writable[9];
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let seen = Arc::clone(&calls);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let client = runtime
+            .block_on(ShredStreamClient::new_with_config(
+                ShredStreamConfig::default(),
+            ))
+            .unwrap()
+            .with_address_lookup_resolver(move |transaction, slot| {
+                assert_eq!(slot, 77);
+                assert_eq!(transaction.message.static_account_keys().len(), 1);
+                seen.fetch_add(1, Ordering::Relaxed);
+                Ok(addresses.clone())
+            });
+        let queue = Arc::new(ArrayQueue::new(4));
+        let sink = EventSink::Queue(Arc::clone(&queue));
+        let filter = EventTypeFilter::include_only(vec![crate::grpc::EventType::RaydiumCpmmSwap]);
+        let batch = ShredEntryBatch {
+            slot: 77,
+            entries: vec![Entry {
+                num_hashes: 1,
+                hash: Hash::default(),
+                transactions: vec![tx.clone(), raydium_cpmm_swap_tx()],
+            }],
+        };
+        let mut events = vec![];
+        process_dex_entry_batch(
+            batch,
+            Some(&filter),
+            &sink,
+            &mut events,
+            client.address_lookup_resolver.as_deref(),
+            &client.address_lookup_counters,
+        );
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert_eq!(client.address_lookup_stats().resolved_transactions, 1);
+        let DexEvent::RaydiumCpmmSwap(event) = queue.pop().unwrap() else {
+            panic!("swap")
+        };
+        assert_eq!(event.pool_id, expected_pool);
+        assert_eq!(event.input_token_mint, expected_input_mint);
+        assert_eq!(
+            event.metadata.recent_blockhash.as_deref(),
+            Some(tx.message.recent_blockhash().to_string().as_str())
+        );
+        assert!(event.metadata.grpc_recv_us > 0);
+        assert_eq!(queue.pop().unwrap().metadata().tx_index, 1);
+        assert!(queue.pop().is_none());
+        let excluded = EventTypeFilter::include_only(vec![crate::grpc::EventType::PumpFunBuy]);
+        let batch = ShredEntryBatch {
+            slot: 77,
+            entries: vec![Entry {
+                num_hashes: 1,
+                hash: Hash::default(),
+                transactions: vec![tx],
+            }],
+        };
+        process_dex_entry_batch(
+            batch,
+            Some(&excluded),
+            &sink,
+            &mut events,
+            client.address_lookup_resolver.as_deref(),
+            &client.address_lookup_counters,
+        );
+        assert!(queue.pop().is_none());
+        assert_eq!(
+            client.clone().address_lookup_stats(),
+            AddressLookupStats {
+                resolved_transactions: 2,
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn missing_alt_resolver_skips_unresolved_instruction_and_counts_transaction() {
+        let (tx, _) = cpmm_alt_transaction();
+        let queue = Arc::new(ArrayQueue::new(4));
+        let sink = EventSink::Queue(Arc::clone(&queue));
+        let batch = ShredEntryBatch {
+            slot: 77,
+            entries: vec![Entry {
+                num_hashes: 1,
+                hash: Hash::default(),
+                transactions: vec![tx, raydium_cpmm_swap_tx()],
+            }],
+        };
+        let stats = AddressLookupCounters::default();
+        process_dex_entry_batch(batch, None, &sink, &mut Vec::new(), None, &stats);
+        assert_eq!(queue.pop().unwrap().metadata().tx_index, 1);
+        assert!(queue.pop().is_none());
+        assert_eq!(
+            stats.snapshot(),
+            AddressLookupStats {
+                transactions_without_resolver: 1,
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn failed_alt_resolution_skips_transaction_and_continues_batch() {
+        for invalid_addresses in [false, true] {
+            let (tx, _) = cpmm_alt_transaction();
+            let resolver = move |_: &VersionedTransaction, _: u64| -> AnyResult<LoadedAddresses> {
+                if invalid_addresses {
+                    Ok(LoadedAddresses::default())
+                } else {
+                    Err(anyhow::anyhow!("cache miss"))
+                }
+            };
+            let queue = Arc::new(ArrayQueue::new(4));
+            let sink = EventSink::Queue(Arc::clone(&queue));
+            let batch = ShredEntryBatch {
+                slot: 77,
+                entries: vec![Entry {
+                    num_hashes: 1,
+                    hash: Hash::default(),
+                    transactions: vec![tx, raydium_cpmm_swap_tx()],
+                }],
+            };
+            let mut events = vec![];
+            let stats = AddressLookupCounters::default();
+            process_dex_entry_batch(batch, None, &sink, &mut events, Some(&resolver), &stats);
+            assert_eq!(queue.pop().unwrap().metadata().tx_index, 1);
+            assert!(queue.pop().is_none());
+            assert!(events.is_empty());
+            assert_eq!(
+                stats.snapshot(),
+                AddressLookupStats {
+                    resolution_failures: 1,
+                    ..Default::default()
+                }
+            );
         }
     }
 
@@ -725,7 +1016,14 @@ mod tests {
             }],
         };
 
-        process_dex_entry_batch(batch, None, &sink, &mut events);
+        process_dex_entry_batch(
+            batch,
+            None,
+            &sink,
+            &mut events,
+            None,
+            &AddressLookupCounters::default(),
+        );
 
         let event = queue.pop().expect("event");
         assert!(matches!(event, DexEvent::RaydiumCpmmSwap(_)));
@@ -749,7 +1047,14 @@ mod tests {
         };
         let filter = EventTypeFilter::include_only(vec![crate::grpc::EventType::PumpFunBuy]);
 
-        process_dex_entry_batch(batch, Some(&filter), &sink, &mut events);
+        process_dex_entry_batch(
+            batch,
+            Some(&filter),
+            &sink,
+            &mut events,
+            None,
+            &AddressLookupCounters::default(),
+        );
 
         assert!(queue.pop().is_none());
     }

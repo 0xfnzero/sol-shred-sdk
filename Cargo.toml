@@ -1,6 +1,6 @@
 [package]
 name = "sol-shred-sdk"
-version = "4.0.0"
+version = "4.0.2"
 edition = "2021"
 authors = []
 repository = "https://github.com/0xfnzero/sol-shred-sdk"
@@ -11,6 +11,7 @@ readme = "README.md"
 autobins = false
 exclude = [
     "jetstream_protos/**",
+    "tools/parser-parity/**",
     "src/connector/**",
     "src/decoder/**",
     "src/main.rs",
@@ -33,6 +34,7 @@ perf-stats = []
 ultra-perf = []
 
 [dependencies]
+solana-instruction = "=3.4.1"
 # Solana/Agave 4.2 dependencies. Keep the modular SDK crates aligned with
 # solana-entry so Entry and VersionedTransaction are the same concrete types.
 solana-commitment-config = "=3.1.1"

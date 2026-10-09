@@ -124,6 +124,8 @@ mod tests {
         push_u64(&mut data, 170); // quote_amount
         push_u64(&mut data, 180); // virtual_quote_reserves
         push_u64(&mut data, 190); // real_quote_reserves
+        push_u64(&mut data, 200); // holder_rewards_bps
+        push_u64(&mut data, 210); // holder_rewards
 
         format!("Program data: {}", general_purpose::STANDARD.encode(data))
     }
@@ -150,6 +152,8 @@ mod tests {
                 assert_eq!(t.quote_amount, 170);
                 assert_eq!(t.virtual_quote_reserves, 180);
                 assert_eq!(t.real_quote_reserves, 190);
+                assert_eq!(t.holder_rewards_bps, 200);
+                assert_eq!(t.holder_rewards, 210);
                 assert!(t.is_created_buy);
             }
             other => panic!("expected buy event, got {other:?}"),

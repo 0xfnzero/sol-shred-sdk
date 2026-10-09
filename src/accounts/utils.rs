@@ -10,33 +10,23 @@ use spl_token_interface::state::Account as SplTokenStateAccount;
 /// 从字节数组中读取 Pubkey
 #[inline]
 pub fn read_pubkey(data: &[u8], offset: usize) -> Option<Pubkey> {
-    if data.len() < offset + 32 {
-        return None;
-    }
-    let bytes: [u8; 32] = data[offset..offset + 32].try_into().ok()?;
+    let end = offset.checked_add(32)?;
+    let bytes: [u8; 32] = data.get(offset..end)?.try_into().ok()?;
     Some(Pubkey::new_from_array(bytes))
 }
 
 /// 从字节数组中读取 u64（小端序）
 #[inline]
 pub fn read_u64_le(data: &[u8], offset: usize) -> Option<u64> {
-    if data.len() < offset + 8 {
-        return None;
-    }
-    Some(u64::from_le_bytes(
-        data[offset..offset + 8].try_into().ok()?,
-    ))
+    let end = offset.checked_add(8)?;
+    Some(u64::from_le_bytes(data.get(offset..end)?.try_into().ok()?))
 }
 
 /// 从字节数组中读取 u16（小端序）
 #[inline]
 pub fn read_u16_le(data: &[u8], offset: usize) -> Option<u16> {
-    if data.len() < offset + 2 {
-        return None;
-    }
-    Some(u16::from_le_bytes(
-        data[offset..offset + 2].try_into().ok()?,
-    ))
+    let end = offset.checked_add(2)?;
+    Some(u16::from_le_bytes(data.get(offset..end)?.try_into().ok()?))
 }
 
 /// 从字节数组中读取 u8

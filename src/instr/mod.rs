@@ -46,6 +46,9 @@ fn supports_pumpfun_instruction(disc: [u8; 8]) -> bool {
     matches!(
         disc,
         pump::discriminators::CREATE
+            | pump::discriminators::BUY_V3
+            | pump::discriminators::BUY_EXACT_QUOTE_IN_V3
+            | pump::discriminators::SELL_V3
             | pump::discriminators::CREATE_V2
             | pump::discriminators::BUY
             | pump::discriminators::SELL
@@ -61,6 +64,9 @@ fn supports_pumpswap_instruction(disc: [u8; 8]) -> bool {
     matches!(
         disc,
         pump_amm::discriminators::BUY
+            | pump_amm::discriminators::BUY_V2
+            | pump_amm::discriminators::BUY_EXACT_QUOTE_IN_V2
+            | pump_amm::discriminators::SELL_V2
             | pump_amm::discriminators::SELL
             | pump_amm::discriminators::CREATE_POOL
             | pump_amm::discriminators::BUY_EXACT_QUOTE_IN
@@ -98,6 +104,8 @@ fn supports_launchlab_instruction(disc: [u8; 8]) -> bool {
             | raydium_launchlab::discriminators::INITIALIZE
             | raydium_launchlab::discriminators::INITIALIZE_V2
             | raydium_launchlab::discriminators::INITIALIZE_WITH_TOKEN_2022
+            | raydium_launchlab::discriminators::MIGRATE_TO_AMM
+            | raydium_launchlab::discriminators::MIGRATE_TO_CPSWAP
     )
 }
 
@@ -110,6 +118,8 @@ fn supports_cpmm_instruction(disc: [u8; 8]) -> bool {
             | raydium_cpmm::discriminators::INITIALIZE
             | raydium_cpmm::discriminators::DEPOSIT
             | raydium_cpmm::discriminators::WITHDRAW
+            | raydium_cpmm::discriminators::COLLECT_CREATOR_FEE
+            | raydium_cpmm::discriminators::COLLECT_CREATOR_FEE_PERMISSIONLESS
     )
 }
 
@@ -140,6 +150,8 @@ fn supports_raydium_amm_v4_instruction(instruction_data: &[u8]) -> bool {
             | Some(raydium_amm::discriminators::WITHDRAW)
             | Some(raydium_amm::discriminators::INITIALIZE2)
             | Some(raydium_amm::discriminators::WITHDRAW_PNL)
+            | Some(raydium_amm::discriminators::SWAP_BASE_IN_V2)
+            | Some(raydium_amm::discriminators::SWAP_BASE_OUT_V2)
     )
 }
 
@@ -152,6 +164,9 @@ fn supports_orca_instruction(disc: [u8; 8]) -> bool {
             | orca_whirlpool::discriminators::INCREASE_LIQUIDITY
             | orca_whirlpool::discriminators::DECREASE_LIQUIDITY
             | orca_whirlpool::discriminators::INITIALIZE_POOL
+            | orca_whirlpool::discriminators::INITIALIZE_POOL_V2
+            | orca_whirlpool::discriminators::INCREASE_LIQUIDITY_V2
+            | orca_whirlpool::discriminators::DECREASE_LIQUIDITY_V2
     )
 }
 
@@ -161,8 +176,17 @@ fn supports_meteora_pools_instruction(disc: [u8; 8]) -> bool {
         disc,
         meteora_amm::discriminators::SWAP
             | meteora_amm::discriminators::ADD_LIQUIDITY
+            | meteora_amm::discriminators::ADD_IMBALANCE_LIQUIDITY
             | meteora_amm::discriminators::REMOVE_LIQUIDITY
+            | meteora_amm::discriminators::REMOVE_LIQUIDITY_SINGLE_SIDE
+            | meteora_amm::discriminators::BOOTSTRAP_LIQUIDITY
+            | meteora_amm::discriminators::INITIALIZE_PERMISSIONED_POOL
+            | meteora_amm::discriminators::INITIALIZE_PERMISSIONLESS_POOL
+            | meteora_amm::discriminators::INITIALIZE_PERMISSIONLESS_POOL_WITH_FEE_TIER
+            | meteora_amm::discriminators::INITIALIZE_CUSTOMIZABLE_POOL
             | meteora_amm::discriminators::CREATE_POOL
+            | meteora_amm::discriminators::CREATE_POOL_WITH_CONFIG2
+            | meteora_amm::discriminators::SET_POOL_FEES
     )
 }
 
@@ -188,6 +212,10 @@ fn supports_meteora_damm_v2_instruction(instruction_data: &[u8]) -> bool {
             | meteora_damm::discriminators::CLOSE_POSITION_LOG
             | meteora_damm::discriminators::ADD_LIQUIDITY_LOG
             | meteora_damm::discriminators::REMOVE_LIQUIDITY_LOG
+            | meteora_damm::discriminators::CLAIM_POSITION_FEE_LOG
+            | meteora_damm::discriminators::INITIALIZE_REWARD_LOG
+            | meteora_damm::discriminators::FUND_REWARD_LOG
+            | meteora_damm::discriminators::CLAIM_REWARD_LOG
     )
 }
 
@@ -232,6 +260,10 @@ pub(crate) fn instruction_data_may_parse(program_id: &Pubkey, instruction_data: 
     if *program_id == METEORA_DLMM_PROGRAM_ID {
         return supports_meteora_dlmm_instruction(instruction_data);
     }
+    if *program_id == METEORA_DBC_PROGRAM_ID {
+        return instruction_data.get(..8) == Some(&[228, 69, 165, 46, 81, 203, 154, 29])
+            && instruction_data.len() >= 16;
+    }
     if *program_id == METEORA_DAMM_V2_PROGRAM_ID {
         return supports_meteora_damm_v2_instruction(instruction_data);
     }
@@ -266,6 +298,9 @@ pub(crate) fn normal_instruction_data_may_parse(
     program_id: &Pubkey,
     instruction_data: &[u8],
 ) -> bool {
+    if *program_id == METEORA_DBC_PROGRAM_ID {
+        return false;
+    }
     if *program_id == METEORA_DAMM_V2_PROGRAM_ID {
         return disc8(instruction_data)
             .is_some_and(|disc| disc == meteora_damm::discriminators::INITIALIZE_POOL);
@@ -305,6 +340,34 @@ pub fn parse_instruction_unified(
     // 快速检查指令数据长度，避免无效解析
     if instruction_data.is_empty() {
         return None;
+    }
+
+    if *program_id == METEORA_DBC_PROGRAM_ID {
+        if event_type_filter.is_some_and(|f| !f.includes_meteora_dbc()) {
+            return None;
+        }
+        let metadata = crate::logs::utils::create_metadata_simple(
+            signature,
+            slot,
+            tx_index,
+            block_time_us,
+            Pubkey::default(),
+            grpc_recv_us,
+        );
+        return filter_parsed_event(
+            crate::logs::meteora_dbc::parse_event_cpi(instruction_data, metadata),
+            event_type_filter,
+        );
+    }
+
+    // Official LP execution data is distinct from deposit/withdraw limits.
+    if *program_id == RAYDIUM_CPMM_PROGRAM_ID
+        && instruction_data.get(..16) == Some(&all_inner::raydium_cpmm::discriminators::LP_CHANGE_EVENT) {
+        let metadata = crate::logs::utils::create_metadata_simple(signature, slot, tx_index,
+            block_time_us, Pubkey::default(), grpc_recv_us);
+        return filter_parsed_event(all_inner::raydium_cpmm::parse(
+            &all_inner::raydium_cpmm::discriminators::LP_CHANGE_EVENT, &instruction_data[16..], metadata,
+        ), event_type_filter);
     }
 
     // 根据程序 ID 路由到相应的解析器，按使用频率排序
@@ -549,6 +612,38 @@ mod tests {
                 0,
                 0
             ]
+        ));
+        assert!(instruction_data_may_parse(
+            &RAYDIUM_AMM_V4_PROGRAM_ID,
+            &[
+                raydium_amm::discriminators::SWAP_BASE_IN_V2,
+                1,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+            ]
+        ));
+        assert!(instruction_data_may_parse(
+            &RAYDIUM_AMM_V4_PROGRAM_ID,
+            &[
+                raydium_amm::discriminators::SWAP_BASE_OUT_V2,
+                1,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0
+            ]
+        ));
+        assert!(instruction_data_may_parse(
+            &RAYDIUM_LAUNCHLAB_PROGRAM_ID,
+            &data8(raydium_launchlab::discriminators::MIGRATE_TO_CPSWAP)
         ));
         assert!(instruction_data_may_parse(
             &ORCA_WHIRLPOOL_PROGRAM_ID,

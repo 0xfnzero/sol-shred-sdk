@@ -42,12 +42,15 @@ pub mod accounts;
 pub mod common;
 pub mod constants;
 pub mod core;
+pub mod cpmm_creator_fee;
 pub mod grpc;
 pub mod instr;
 pub mod logs;
 pub mod parser;
 pub mod shred;
 pub mod shredstream;
+pub mod stonkfun_registry;
+pub mod transaction_route;
 
 pub use common::logs_events::PumpfunEvent;
 pub use common::AnyResult;
@@ -58,6 +61,14 @@ pub use grpc::ShredStreamGrpc;
 pub use parser::{PumpfunEventParser, PumpfunParserConfig};
 pub use shred::{RawShredClient, RawShredConfig, RawShredDecoder, ShredEntryBatch, ShredTxBatch};
 pub use shredstream::{
-    parse_transaction_dex_events, parse_transaction_dex_events_with_filter, JitoShredStreamConfig,
-    ShredDecodeMode, ShredStreamClient, ShredStreamConfig,
+    parse_transaction_dex_events, parse_transaction_dex_events_best_effort,
+    parse_transaction_dex_events_with_filter, parse_transaction_dex_events_with_loaded_addresses,
+    AddressLookupResolver, AddressLookupStats, JitoShredStreamConfig, ShredDecodeMode,
+    ShredStreamClient, ShredStreamConfig,
+};
+pub use stonkfun_registry::{StonkFunGraduatedPool, StonkFunPoolRegistry};
+pub use transaction_route::{
+    analyze_yellowstone_transaction_routes, InstructionPosition, NativeTokenAction,
+    RouteNativeTokenAction, RouteSwapLeg, RouteTokenTransfer, RouteUnknownInvocation, SwapProtocol,
+    TransactionRoute,
 };

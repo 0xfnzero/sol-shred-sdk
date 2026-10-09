@@ -1,0 +1,121 @@
+[
+  {
+    "file": "sell-v0.json",
+    "signature": "fGdvyUkJvK8GYEzExeTKY6gA1i5EQ381PpCCcqEtmuzRskHavXM5kfcqScGbG7nzhFSTHMEvkKz5jdsUoXjHb2k",
+    "slot": 453451494,
+    "version": 0,
+    "source": "https://api.mainnet-beta.solana.com",
+    "commitment": "finalized",
+    "captured_at": "2026-10-06",
+    "sha256": "a3595299e94c43bce2c7650cdd8361b7c22c9646c57d850ab0e33e665cfba979",
+    "expected_trade": {
+      "side": "sell",
+      "base_reserve": 202206934088,
+      "raw_quote_reserve": 166240698887946,
+      "virtual_quote_reserve": "0",
+      "effective_quote_reserve": 166240698887946
+    }
+  },
+  {
+    "file": "sell-v1.json",
+    "signature": "2Bhs2661gDgovELbNCJVohrPC7zzyQmtEjt96KNkDXGt7SLdN85r1ea42xt6sbj6nh7x4Ca4fqsRxXmDR7hgTXfq",
+    "slot": 453491396,
+    "version": 1,
+    "source": "https://api.mainnet-beta.solana.com",
+    "commitment": "finalized",
+    "captured_at": "2026-10-06",
+    "sha256": "4b25715e09f77b70f7af4b601606c53d142d1be74a005c4f617377f7fb58c9c2",
+    "expected_trade": {
+      "side": "sell",
+      "base_reserve": 174360567758180,
+      "raw_quote_reserve": 83692135778,
+      "virtual_quote_reserve": "17554251914",
+      "effective_quote_reserve": 101246387692
+    }
+  },
+  {
+    "file": "buy-legacy.json",
+    "signature": "57mk1HYbtLTgNUbw7LQ9rF8BW4M8aWGReLfgVA7BReiajjT2frBJivYKcfxRzsiCis8U8xt1XiRHbcc7bFfKpqaM",
+    "slot": 453656764,
+    "version": "legacy",
+    "source": "https://api.mainnet-beta.solana.com",
+    "commitment": "finalized",
+    "captured_at": "2026-10-06",
+    "sha256": "9708322d0c8f4049fd99e64431595897284c0817a7d2217ba234cec844a5e2f1",
+    "expected_trade": {
+      "side": "buy",
+      "base_reserve": 41877391245981,
+      "raw_quote_reserve": 403961946118,
+      "virtual_quote_reserve": "17584505288",
+      "effective_quote_reserve": 421546451406
+    }
+  },
+  {
+    "file": "discovered-0.json",
+    "signature": "4HPM6gbBB9TJNuBqoKHNtWHKUr2YkWtRsw7vgSmhqY7G7iENKUHe7qBAiCrSxZqH1b1qbmvEsvmAaqBs3Wb7fgf",
+    "slot": 453659010,
+    "version": 0,
+    "source": "https://api.mainnet-beta.solana.com",
+    "commitment": "finalized",
+    "captured_at": "2026-10-06",
+    "sha256": "8395c0007c401e080d8c69b9838934228ee2d01b8bd7799a287b65382a2f1d3b",
+    "expected_trade": {
+      "side": "sell",
+      "base_reserve": 197446998179,
+      "raw_quote_reserve": 170237391497318,
+      "virtual_quote_reserve": "0",
+      "effective_quote_reserve": 170237391497318
+    }
+  },
+  {
+    "file": "discovered-1.json",
+    "signature": "5Vu8E9cFYPCn2dRMqam32EqrJhT4bm9Xv8VTgRV4d1NghPZDpzLFsieM6oLHp3Hvkdbjy57HsYb6UjdQ2LQ28sAs",
+    "slot": 453659010,
+    "version": "legacy",
+    "source": "https://api.mainnet-beta.solana.com",
+    "commitment": "finalized",
+    "captured_at": "2026-10-06",
+    "sha256": "c8ddb4ab2b564230650316db59462c1e86d2b4f9d55e8636daf28acc4870281a",
+    "expected_trade": {
+      "side": "buy",
+      "base_reserve": 62515985127506,
+      "raw_quote_reserve": 264192244294,
+      "virtual_quote_reserve": "17584505288",
+      "effective_quote_reserve": 281776749582
+    }
+  },
+  {
+    "file": "discovered-2.json",
+    "signature": "gNMEEMknDznSwfnuE5MHdd3yRHjChHRXYFYybuyR98zdMt69ZfHarQaF9ZQissZzNwVDb1F78KMyHu7x2VNk5KY",
+    "slot": 453659010,
+    "version": 0,
+    "source": "https://api.mainnet-beta.solana.com",
+    "commitment": "finalized",
+    "captured_at": "2026-10-06",
+    "sha256": "f6dc3aa0b96a66b1caa720cc6e8a0c1632e2ca0a07c3e16b8c53ed6b0297afe5",
+    "expected_trade": {
+      "side": "buy",
+      "base_reserve": 85681980752,
+      "raw_quote_reserve": 225866806382033,
+      "virtual_quote_reserve": "0",
+      "effective_quote_reserve": 225866806382033
+    }
+  },
+  {
+    "file": "discovered-3.json",
+    "signature": "kNxRxDeSxRLxw4ZnhVUzbugE2CY8SAkHTSsqus7UB1QYpovAV2wmyc63oYj66TdVjqvmwmozvJwvfB4JR1HxLZ6",
+    "slot": 453659010,
+    "version": "legacy",
+    "source": "https://api.mainnet-beta.solana.com",
+    "commitment": "finalized",
+    "captured_at": "2026-10-06",
+    "sha256": "769002035e4c1e4181f37d293578690cbdb0b1a4cddeb00004db2a3df69271ba",
+    "expected_trade": {
+      "side": "buy",
+      "base_reserve": 77186519317117,
+      "raw_quote_reserve": 223806889590,
+      "virtual_quote_reserve": "17583976942",
+      "effective_quote_reserve": 241390866532
+    }
+  }
+]

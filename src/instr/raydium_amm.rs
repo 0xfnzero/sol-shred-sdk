@@ -16,6 +16,9 @@ pub enum RaydiumAmmV4Instruction {
     WithdrawPnl = 7,
     SwapBaseIn = 9,
     SwapBaseOut = 11,
+    /// Post 2026-07-22 OpenBook removal — 8 accounts, no serum market.
+    SwapBaseInV2 = 16,
+    SwapBaseOutV2 = 17,
 }
 
 impl RaydiumAmmV4Instruction {
@@ -28,6 +31,8 @@ impl RaydiumAmmV4Instruction {
             7 => Some(Self::WithdrawPnl),
             9 => Some(Self::SwapBaseIn),
             11 => Some(Self::SwapBaseOut),
+            16 => Some(Self::SwapBaseInV2),
+            17 => Some(Self::SwapBaseOutV2),
             _ => None,
         }
     }
@@ -37,6 +42,8 @@ impl RaydiumAmmV4Instruction {
 pub mod discriminators {
     pub const SWAP_BASE_IN: u8 = 9;
     pub const SWAP_BASE_OUT: u8 = 11;
+    pub const SWAP_BASE_IN_V2: u8 = 16;
+    pub const SWAP_BASE_OUT_V2: u8 = 17;
     pub const DEPOSIT: u8 = 3;
     pub const WITHDRAW: u8 = 4;
     pub const INITIALIZE2: u8 = 1;
@@ -75,6 +82,22 @@ pub fn parse_instruction(
             tx_index,
             block_time_us,
         ),
+        RaydiumAmmV4Instruction::SwapBaseInV2 => parse_swap_base_in_v2_instruction(
+            data,
+            accounts,
+            signature,
+            slot,
+            tx_index,
+            block_time_us,
+        ),
+        RaydiumAmmV4Instruction::SwapBaseOutV2 => parse_swap_base_out_v2_instruction(
+            data,
+            accounts,
+            signature,
+            slot,
+            tx_index,
+            block_time_us,
+        ),
         RaydiumAmmV4Instruction::Deposit => {
             parse_deposit_instruction(data, accounts, signature, slot, tx_index, block_time_us)
         }
@@ -88,6 +111,92 @@ pub fn parse_instruction(
             parse_withdraw_pnl_instruction(data, accounts, signature, slot, tx_index, block_time_us)
         }
     }
+}
+
+/// SwapBaseInV2 (tag 16): tokenProgram, amm, authority, coinVault, pcVault, userSrc, userDst, owner
+fn parse_swap_base_in_v2_instruction(
+    data: &[u8],
+    accounts: &[Pubkey],
+    signature: Signature,
+    slot: u64,
+    tx_index: u64,
+    block_time_us: Option<i64>,
+) -> Option<DexEvent> {
+    let amount_in = read_u64_le(data, 0)?;
+    let minimum_amount_out = read_u64_le(data, 8)?;
+    let amm = get_account(accounts, 1)?;
+    let metadata = create_metadata_simple(signature, slot, tx_index, block_time_us, amm);
+    Some(DexEvent::RaydiumAmmV4Swap(RaydiumAmmV4SwapEvent {
+        metadata,
+        ix_name: "swap_base_in_v2".into(),
+        instruction_amount_in: amount_in,
+        amount_in: 0,
+        minimum_amount_out,
+        max_amount_in: 0,
+        instruction_amount_out: 0,
+        amount_out: 0,
+        token_program: get_account(accounts, 0).unwrap_or_default(),
+        amm,
+        amm_authority: get_account(accounts, 2).unwrap_or_default(),
+        amm_open_orders: Pubkey::default(),
+        amm_target_orders: None,
+        pool_coin_token_account: get_account(accounts, 3).unwrap_or_default(),
+        pool_pc_token_account: get_account(accounts, 4).unwrap_or_default(),
+        serum_program: Pubkey::default(),
+        serum_market: Pubkey::default(),
+        serum_bids: Pubkey::default(),
+        serum_asks: Pubkey::default(),
+        serum_event_queue: Pubkey::default(),
+        serum_coin_vault_account: Pubkey::default(),
+        serum_pc_vault_account: Pubkey::default(),
+        serum_vault_signer: Pubkey::default(),
+        user_source_token_account: get_account(accounts, 5).unwrap_or_default(),
+        user_destination_token_account: get_account(accounts, 6).unwrap_or_default(),
+        user_source_owner: get_account(accounts, 7).unwrap_or_default(),
+    }))
+}
+
+/// SwapBaseOutV2 (tag 17): same 8-account layout as V2 in.
+fn parse_swap_base_out_v2_instruction(
+    data: &[u8],
+    accounts: &[Pubkey],
+    signature: Signature,
+    slot: u64,
+    tx_index: u64,
+    block_time_us: Option<i64>,
+) -> Option<DexEvent> {
+    let max_amount_in = read_u64_le(data, 0)?;
+    let amount_out = read_u64_le(data, 8)?;
+    let amm = get_account(accounts, 1)?;
+    let metadata = create_metadata_simple(signature, slot, tx_index, block_time_us, amm);
+    Some(DexEvent::RaydiumAmmV4Swap(RaydiumAmmV4SwapEvent {
+        metadata,
+        ix_name: "swap_base_out_v2".into(),
+        instruction_amount_in: 0,
+        amount_in: 0,
+        minimum_amount_out: 0,
+        max_amount_in,
+        instruction_amount_out: amount_out,
+        amount_out: 0,
+        token_program: get_account(accounts, 0).unwrap_or_default(),
+        amm,
+        amm_authority: get_account(accounts, 2).unwrap_or_default(),
+        amm_open_orders: Pubkey::default(),
+        amm_target_orders: None,
+        pool_coin_token_account: get_account(accounts, 3).unwrap_or_default(),
+        pool_pc_token_account: get_account(accounts, 4).unwrap_or_default(),
+        serum_program: Pubkey::default(),
+        serum_market: Pubkey::default(),
+        serum_bids: Pubkey::default(),
+        serum_asks: Pubkey::default(),
+        serum_event_queue: Pubkey::default(),
+        serum_coin_vault_account: Pubkey::default(),
+        serum_pc_vault_account: Pubkey::default(),
+        serum_vault_signer: Pubkey::default(),
+        user_source_token_account: get_account(accounts, 5).unwrap_or_default(),
+        user_destination_token_account: get_account(accounts, 6).unwrap_or_default(),
+        user_source_owner: get_account(accounts, 7).unwrap_or_default(),
+    }))
 }
 
 /// 解析 SwapBaseIn 指令
@@ -112,9 +221,12 @@ fn parse_swap_base_in_instruction(
     let shift = usize::from(accounts.len() == 17);
     Some(DexEvent::RaydiumAmmV4Swap(RaydiumAmmV4SwapEvent {
         metadata,
-        amount_in,
+        ix_name: "swap_base_in".into(),
+        instruction_amount_in: amount_in,
+        amount_in: 0,
         minimum_amount_out,
         max_amount_in: 0,
+        instruction_amount_out: 0,
         amount_out: 0,
         token_program: get_account(accounts, 0).unwrap_or_default(),
         amm,
@@ -163,10 +275,13 @@ fn parse_swap_base_out_instruction(
     let shift = usize::from(accounts.len() == 17);
     Some(DexEvent::RaydiumAmmV4Swap(RaydiumAmmV4SwapEvent {
         metadata,
+        ix_name: "swap_base_out".into(),
+        instruction_amount_in: 0,
         amount_in: 0,
         minimum_amount_out: 0,
         max_amount_in,
-        amount_out,
+        instruction_amount_out: amount_out,
+        amount_out: 0,
         token_program: get_account(accounts, 0).unwrap_or_default(),
         amm,
         amm_authority: get_account(accounts, 2).unwrap_or_default(),
@@ -401,5 +516,83 @@ mod tests {
         assert_eq!(current_event.amm_target_orders, None);
         assert_eq!(current_event.pool_coin_token_account, current[4]);
         assert_eq!(current_event.user_source_owner, current[16]);
+    }
+
+    #[test]
+    fn swap_v2_maps_eight_accounts_without_serum() {
+        let accounts: Vec<_> = (0..8)
+            .map(|i| Pubkey::new_from_array([i + 1; 32]))
+            .collect();
+        let mut data = vec![discriminators::SWAP_BASE_IN_V2];
+        data.extend_from_slice(&100u64.to_le_bytes());
+        data.extend_from_slice(&90u64.to_le_bytes());
+        let event =
+            parse_instruction(&data, &accounts, Signature::default(), 1, 0, None).expect("v2 swap");
+        let DexEvent::RaydiumAmmV4Swap(event) = event else {
+            panic!("unexpected event")
+        };
+        assert_eq!(event.instruction_amount_in, 100);
+        assert_eq!(event.amount_in, 0);
+        assert_eq!(event.minimum_amount_out, 90);
+        assert_eq!(event.token_program, accounts[0]);
+        assert_eq!(event.amm, accounts[1]);
+        assert_eq!(event.amm_authority, accounts[2]);
+        assert_eq!(event.pool_coin_token_account, accounts[3]);
+        assert_eq!(event.pool_pc_token_account, accounts[4]);
+        assert_eq!(event.user_source_token_account, accounts[5]);
+        assert_eq!(event.user_destination_token_account, accounts[6]);
+        assert_eq!(event.user_source_owner, accounts[7]);
+        assert_eq!(event.amm_open_orders, Pubkey::default());
+        assert!(event.amm_target_orders.is_none());
+        assert_eq!(event.serum_market, Pubkey::default());
+    }
+}
+
+#[cfg(test)]
+mod swap_parameter_semantics_tests {
+    use super::*;
+    #[test]
+    fn swap_wire_quantities_and_limits_are_distinct_from_execution() {
+        for (tag, name, count, exact_input) in [
+            (9, "swap_base_in", 18),
+            (11, "swap_base_out", 18),
+            (16, "swap_base_in_v2", 8),
+            (17, "swap_base_out_v2", 8),
+        ]
+        .map(|(t, n, c)| (t, n, c, t == 9 || t == 16))
+        {
+            let accounts: Vec<_> = (0..count).map(|_| Pubkey::new_unique()).collect();
+            for (specified, limit) in [(0u64, u64::MAX), (u64::MAX, 0)] {
+                let mut data = vec![tag];
+                let values = if exact_input {
+                    [specified, limit]
+                } else {
+                    [limit, specified]
+                };
+                for v in values {
+                    data.extend_from_slice(&v.to_le_bytes());
+                }
+                let DexEvent::RaydiumAmmV4Swap(e) =
+                    parse_instruction(&data, &accounts, Signature::default(), 1, 0, None).unwrap()
+                else {
+                    panic!("swap")
+                };
+                assert_eq!(e.ix_name, name);
+                assert_eq!((e.amount_in, e.amount_out), (0, 0));
+                assert_eq!(
+                    (e.instruction_amount_in, e.instruction_amount_out),
+                    if exact_input {
+                        (specified, 0)
+                    } else {
+                        (0, specified)
+                    }
+                );
+                assert_eq!(
+                    (e.minimum_amount_out, e.max_amount_in),
+                    if exact_input { (limit, 0) } else { (0, limit) }
+                );
+                assert_eq!(e.user_source_owner, accounts[count - 1]);
+            }
+        }
     }
 }

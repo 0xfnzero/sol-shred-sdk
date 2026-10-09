@@ -27,7 +27,6 @@
 //! ```
 
 use crate::core::events::*;
-use crate::instr::inner_common::*;
 
 /// PumpSwap inner instruction discriminators (16 bytes)
 /// Format: [event_magic (8 bytes) | event_discriminator (8 bytes)]
@@ -81,6 +80,19 @@ pub fn parse_pumpswap_inner_instruction(
     data: &[u8],
     metadata: EventMetadata,
 ) -> Option<DexEvent> {
+    let disc = if discriminator[..8] == [228, 69, 165, 46, 81, 203, 154, 29] {
+        Some(u64::from_le_bytes(discriminator[8..].try_into().ok()?))
+    } else if discriminator[8..] == [155, 167, 108, 32, 122, 76, 173, 64] {
+        Some(u64::from_le_bytes(discriminator[..8].try_into().ok()?))
+    } else {
+        None
+    };
+    let program = solana_sdk::pubkey!("pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA");
+    if let Some(disc) = disc {
+        if crate::logs::pump_upgrade::event_type(disc, Some(&program)).is_some() {
+            return crate::logs::pump_upgrade::parse(disc, data, metadata, Some(&program));
+        }
+    }
     match *discriminator {
         discriminators::BUY => parse_buy_inner(data, metadata),
         discriminators::SELL => parse_sell_inner(data, metadata),
@@ -118,95 +130,19 @@ fn parse_sell_inner(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
 /// 解析 CreatePool 事件
 #[inline(always)]
 fn parse_create_pool_inner(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
-    unsafe {
-        if !check_length(data, 32 + 32 + 32 + 32 + 8 + 8) {
-            return None;
-        }
-
-        let mut offset = 0;
-        let pool = read_pubkey_unchecked(data, offset);
-        offset += 32;
-        let creator = read_pubkey_unchecked(data, offset);
-        offset += 32;
-        let base_mint = read_pubkey_unchecked(data, offset);
-        offset += 32;
-        let quote_mint = read_pubkey_unchecked(data, offset);
-        offset += 32;
-        let base_amount = read_u64_unchecked(data, offset);
-        offset += 8;
-        let quote_amount = read_u64_unchecked(data, offset);
-
-        Some(DexEvent::PumpSwapCreatePool(PumpSwapCreatePoolEvent {
-            metadata,
-            pool,
-            creator,
-            base_mint,
-            quote_mint,
-            base_amount_in: base_amount,
-            quote_amount_in: quote_amount,
-            ..Default::default()
-        }))
-    }
+    crate::logs::pump_amm::parse_create_pool_from_data(data, metadata)
 }
 
 /// 解析 AddLiquidity 事件
 #[inline(always)]
 fn parse_add_liquidity_inner(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
-    unsafe {
-        if !check_length(data, 32 + 32 + 8 + 8 + 8) {
-            return None;
-        }
-
-        let mut offset = 0;
-        let _pool = read_pubkey_unchecked(data, offset);
-        offset += 32;
-        let _user = read_pubkey_unchecked(data, offset);
-        offset += 32;
-        let base_amount = read_u64_unchecked(data, offset);
-        offset += 8;
-        let quote_amount = read_u64_unchecked(data, offset);
-        offset += 8;
-        let lp_amount = read_u64_unchecked(data, offset);
-
-        Some(DexEvent::PumpSwapLiquidityAdded(PumpSwapLiquidityAdded {
-            metadata,
-            base_amount_in: base_amount,
-            quote_amount_in: quote_amount,
-            lp_token_amount_out: lp_amount,
-            ..Default::default()
-        }))
-    }
+    crate::logs::pump_amm::parse_add_liquidity_from_data(data, metadata)
 }
 
 /// 解析 RemoveLiquidity 事件
 #[inline(always)]
 fn parse_remove_liquidity_inner(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
-    unsafe {
-        if !check_length(data, 32 + 32 + 8 + 8 + 8) {
-            return None;
-        }
-
-        let mut offset = 0;
-        let _pool = read_pubkey_unchecked(data, offset);
-        offset += 32;
-        let _user = read_pubkey_unchecked(data, offset);
-        offset += 32;
-        let lp_amount = read_u64_unchecked(data, offset);
-        offset += 8;
-        let base_amount_out = read_u64_unchecked(data, offset);
-        offset += 8;
-        let quote_amount_out = read_u64_unchecked(data, offset);
-
-        Some(DexEvent::PumpSwapLiquidityRemoved(
-            PumpSwapLiquidityRemoved {
-                metadata,
-                lp_token_amount_in: lp_amount,
-                base_amount_out,
-                quote_amount_out,
-                ..Default::default()
-            },
-        ))
-    }
+    crate::logs::pump_amm::parse_remove_liquidity_from_data(data, metadata)
 }
 
 #[cfg(test)]
@@ -237,5 +173,23 @@ mod tests {
         };
         assert!(sell.is_pump_pool);
         assert_eq!(sell.virtual_quote_reserves, 0);
+
+        let mut current_sell = vec![0u8; 409];
+        current_sell[384..400].copy_from_slice(&(-987_654_321i128).to_le_bytes());
+        current_sell[400] = 1;
+        current_sell[401..409].copy_from_slice(&42u64.to_le_bytes());
+        let sell = parse_pumpswap_inner_instruction(
+            &discriminators::SELL,
+            &current_sell,
+            EventMetadata::default(),
+        )
+        .expect("current sell event should parse");
+        let DexEvent::PumpSwapSell(sell) = sell else {
+            panic!("expected PumpSwapSell event");
+        };
+        assert!(sell.is_pump_pool);
+        assert_eq!(sell.virtual_quote_reserves, -987_654_321);
+        assert!(sell.can_boost);
+        assert_eq!(sell.base_supply, 42);
     }
 }

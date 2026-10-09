@@ -79,82 +79,175 @@ macro_rules! fill_pumpswap_trade_common {
     }};
 }
 
-fn fill_buy_upgrade_accounts(e: &mut PumpSwapBuyEvent, get: &AccountGetter<'_>) {
-    let a26 = get(26);
-    if a26 != Pubkey::default() {
-        if e.pool_v2 == Pubkey::default() {
-            e.pool_v2 = get(24);
+/// Count-aware filling preserves unresolved ALT slots instead of inferring length
+/// from the last nonzero pubkey. Only supported account layouts are enriched.
+pub fn fill_buy_accounts_with_count(
+    e: &mut PumpSwapBuyEvent,
+    get: &AccountGetter<'_>,
+    count: usize,
+) {
+    if count == 17 && get(16) == crate::instr::program_ids::PUMPSWAP_PROGRAM_ID {
+        if e.pool == Pubkey::default() {
+            e.pool = get(0);
         }
-        if e.fee_recipient == Pubkey::default() {
-            e.fee_recipient = get(25);
+        if e.user == Pubkey::default() {
+            e.user = get(1);
+        }
+        if e.base_mint == Pubkey::default() {
+            e.base_mint = get(3);
+        }
+        if e.quote_mint == Pubkey::default() {
+            e.quote_mint = get(4);
+        }
+        if e.user_base_token_account == Pubkey::default() {
+            e.user_base_token_account = get(5);
+        }
+        if e.user_quote_token_account == Pubkey::default() {
+            e.user_quote_token_account = get(6);
+        }
+        if e.pool_base_token_account == Pubkey::default() {
+            e.pool_base_token_account = get(7);
+        }
+        if e.pool_quote_token_account == Pubkey::default() {
+            e.pool_quote_token_account = get(8);
+        }
+        if e.base_token_program == Pubkey::default() {
+            e.base_token_program = get(9);
+        }
+        if e.quote_token_program == Pubkey::default() {
+            e.quote_token_program = get(10);
         }
         if e.fee_recipient_quote_token_account == Pubkey::default() {
-            e.fee_recipient_quote_token_account = a26;
+            e.fee_recipient_quote_token_account = get(14);
         }
         return;
     }
-
-    let a25 = get(25);
-    if a25 != Pubkey::default() {
-        if e.pool_v2 == Pubkey::default() {
-            e.pool_v2 = get(23);
-        }
-        if e.fee_recipient == Pubkey::default() {
-            e.fee_recipient = get(24);
-        }
-        if e.fee_recipient_quote_token_account == Pubkey::default() {
-            e.fee_recipient_quote_token_account = a25;
-        }
+    fill_pumpswap_trade_common!(e, get);
+    // With exactly the fixed accounts there is no tail to enrich. Return before
+    // constructing the scratch account array or attempting PDA identification.
+    if !(24..=27).contains(&count) {
         return;
     }
-
+    // Tail enrichment only fills missing fields. Avoid reads and PDA derivation
+    // when an earlier parser or merge has already supplied all three accounts.
+    if e.pool_v2 != Pubkey::default()
+        && e.fee_recipient != Pubkey::default()
+        && e.fee_recipient_quote_token_account != Pubkey::default()
+    {
+        return;
+    }
+    let mut accounts = [Pubkey::default(); 27];
+    accounts[3] = e.base_mint;
+    for index in 23..count {
+        accounts[index] = get(index);
+    }
+    let (pool_v2, recipient, ata) =
+        crate::instr::pump_amm::buy_upgrade_tail(&accounts[..count], e.base_mint);
     if e.pool_v2 == Pubkey::default() {
-        e.pool_v2 = get(23);
+        e.pool_v2 = pool_v2;
+    }
+    if e.fee_recipient == Pubkey::default() {
+        e.fee_recipient = recipient;
+    }
+    if e.fee_recipient_quote_token_account == Pubkey::default() {
+        e.fee_recipient_quote_token_account = ata;
     }
 }
 
-fn fill_sell_upgrade_accounts(e: &mut PumpSwapSellEvent, get: &AccountGetter<'_>) {
-    let a25 = get(25);
-    if a25 != Pubkey::default() {
-        if e.pool_v2 == Pubkey::default() {
-            e.pool_v2 = get(23);
+pub fn fill_sell_accounts_with_count(
+    e: &mut PumpSwapSellEvent,
+    get: &AccountGetter<'_>,
+    count: usize,
+) {
+    if count == 17 && get(16) == crate::instr::program_ids::PUMPSWAP_PROGRAM_ID {
+        if e.pool == Pubkey::default() {
+            e.pool = get(0);
         }
-        if e.fee_recipient == Pubkey::default() {
-            e.fee_recipient = get(24);
+        if e.user == Pubkey::default() {
+            e.user = get(1);
+        }
+        if e.base_mint == Pubkey::default() {
+            e.base_mint = get(3);
+        }
+        if e.quote_mint == Pubkey::default() {
+            e.quote_mint = get(4);
+        }
+        if e.user_base_token_account == Pubkey::default() {
+            e.user_base_token_account = get(5);
+        }
+        if e.user_quote_token_account == Pubkey::default() {
+            e.user_quote_token_account = get(6);
+        }
+        if e.pool_base_token_account == Pubkey::default() {
+            e.pool_base_token_account = get(7);
+        }
+        if e.pool_quote_token_account == Pubkey::default() {
+            e.pool_quote_token_account = get(8);
+        }
+        if e.base_token_program == Pubkey::default() {
+            e.base_token_program = get(9);
+        }
+        if e.quote_token_program == Pubkey::default() {
+            e.quote_token_program = get(10);
         }
         if e.fee_recipient_quote_token_account == Pubkey::default() {
-            e.fee_recipient_quote_token_account = a25;
+            e.fee_recipient_quote_token_account = get(14);
         }
         return;
     }
-
-    let a23 = get(23);
-    if a23 != Pubkey::default() {
-        if e.pool_v2 == Pubkey::default() {
-            e.pool_v2 = get(21);
-        }
-        if e.fee_recipient == Pubkey::default() {
-            e.fee_recipient = get(22);
-        }
-        if e.fee_recipient_quote_token_account == Pubkey::default() {
-            e.fee_recipient_quote_token_account = a23;
-        }
+    fill_pumpswap_trade_common!(e, get);
+    // No remaining accounts means no tail fields to fill.
+    if !(22..=26).contains(&count) {
         return;
     }
-
+    if e.pool_v2 != Pubkey::default()
+        && e.fee_recipient != Pubkey::default()
+        && e.fee_recipient_quote_token_account != Pubkey::default()
+    {
+        return;
+    }
+    let mut accounts = [Pubkey::default(); 26];
+    accounts[1] = e.user;
+    accounts[3] = e.base_mint;
+    for index in 21..count {
+        accounts[index] = get(index);
+    }
+    let (pool_v2, recipient, ata) =
+        crate::instr::pump_amm::sell_upgrade_tail(&accounts[..count], e.base_mint);
     if e.pool_v2 == Pubkey::default() {
-        e.pool_v2 = get(21);
+        e.pool_v2 = pool_v2;
+    }
+    if e.fee_recipient == Pubkey::default() {
+        e.fee_recipient = recipient;
+    }
+    if e.fee_recipient_quote_token_account == Pubkey::default() {
+        e.fee_recipient_quote_token_account = ata;
     }
 }
 
+/// Compatibility entry point for fully resolved accounts. For ALT or partial
+/// account data, use fill_buy_accounts_with_count with the instruction count.
 pub fn fill_buy_accounts(e: &mut PumpSwapBuyEvent, get: &AccountGetter<'_>) {
-    fill_pumpswap_trade_common!(e, get);
-    fill_buy_upgrade_accounts(e, get);
+    if get(16) == crate::instr::program_ids::PUMPSWAP_PROGRAM_ID && get(17) == Pubkey::default() {
+        return fill_buy_accounts_with_count(e, get, 17);
+    }
+    let count = (23..=27)
+        .rev()
+        .find(|index| get(*index) != Pubkey::default())
+        .map_or(23, |index| index + 1);
+    fill_buy_accounts_with_count(e, get, count);
 }
 
+/// Compatibility entry point; use the count-aware variant for partial accounts.
 pub fn fill_sell_accounts(e: &mut PumpSwapSellEvent, get: &AccountGetter<'_>) {
-    fill_pumpswap_trade_common!(e, get);
-    fill_sell_upgrade_accounts(e, get);
+    if get(16) == crate::instr::program_ids::PUMPSWAP_PROGRAM_ID && get(17) == Pubkey::default() {
+        return fill_sell_accounts_with_count(e, get, 17);
+    }
+    let count = (21..=26)
+        .rev()
+        .find(|index| get(*index) != Pubkey::default())
+        .map_or(21, |index| index + 1);
+    fill_sell_accounts_with_count(e, get, count);
 }
 
 pub fn fill_trade_accounts(_e: &mut PumpSwapTradeEvent, _get: &AccountGetter<'_>) {
@@ -231,4 +324,137 @@ pub fn fill_liquidity_removed_accounts(
 ) {
     // 大部分字段已从事件数据解析
     // PumpSwapLiquidityRemoved 事件结构不包含账户字段，只有数值字段
+}
+
+#[cfg(test)]
+mod upgrade_tests {
+    use super::*;
+
+    #[test]
+    fn count_aware_pumpswap_tails_keep_missing_alt_slots_and_optional_pool() {
+        for (buy, count, cashback, pool_index) in [
+            (true, 25, false, None),
+            (true, 26, true, None),
+            (true, 26, false, Some(23)),
+            (true, 27, true, Some(24)),
+            (false, 23, false, None),
+            (false, 25, true, None),
+            (false, 24, false, Some(21)),
+            (false, 26, true, Some(23)),
+        ] {
+            let mut accounts: Vec<_> = (0..count).map(|_| Pubkey::new_unique()).collect();
+            let expected_pool = pool_index
+                .map(|index| {
+                    let pda = Pubkey::find_program_address(
+                        &[b"pool-v2", accounts[3].as_ref()],
+                        &crate::instr::pump_amm::PROGRAM_ID_PUBKEY,
+                    )
+                    .0;
+                    accounts[index] = pda;
+                    pda
+                })
+                .unwrap_or_default();
+            if cashback && !buy {
+                accounts[21] = Pubkey::find_program_address(
+                    &[b"user_volume_accumulator", accounts[1].as_ref()],
+                    &crate::instr::pump_amm::PROGRAM_ID_PUBKEY,
+                )
+                .0;
+            }
+            let recipient = accounts[count - 2];
+            for missing_ata in [false, true] {
+                let mut keys = accounts.clone();
+                if missing_ata {
+                    keys[count - 1] = Pubkey::default();
+                }
+                let get = |index: usize| keys.get(index).copied().unwrap_or_default();
+                let (pool, actual_recipient, ata) = if buy {
+                    let mut event = PumpSwapBuyEvent::default();
+                    fill_buy_accounts_with_count(&mut event, &get, count);
+                    (
+                        event.pool_v2,
+                        event.fee_recipient,
+                        event.fee_recipient_quote_token_account,
+                    )
+                } else {
+                    let mut event = PumpSwapSellEvent::default();
+                    fill_sell_accounts_with_count(&mut event, &get, count);
+                    (
+                        event.pool_v2,
+                        event.fee_recipient,
+                        event.fee_recipient_quote_token_account,
+                    )
+                };
+                assert_eq!(pool, expected_pool);
+                assert_eq!(actual_recipient, recipient);
+                assert_eq!(ata, keys[count - 1]);
+            }
+        }
+    }
+
+    #[test]
+    fn unresolved_legacy_sell_cashback_prefix_stays_unknown() {
+        let mut accounts: Vec<_> = (0..23).map(|_| Pubkey::new_unique()).collect();
+        accounts[21] = Pubkey::default();
+        let get = |index: usize| accounts.get(index).copied().unwrap_or_default();
+        let mut event = PumpSwapSellEvent::default();
+        fill_sell_accounts_with_count(&mut event, &get, accounts.len());
+        assert_eq!(event.fee_recipient, Pubkey::default());
+        assert_eq!(event.fee_recipient_quote_token_account, Pubkey::default());
+    }
+
+    #[test]
+    fn legacy_buy_pool_tail_and_unknown_extensions_do_not_become_fee_pairs() {
+        let mut accounts: Vec<_> = (0..25).map(|_| Pubkey::new_unique()).collect();
+        accounts[24] = Pubkey::find_program_address(
+            &[b"pool-v2", accounts[3].as_ref()],
+            &crate::instr::pump_amm::PROGRAM_ID_PUBKEY,
+        )
+        .0;
+        let get = |index: usize| accounts.get(index).copied().unwrap_or_default();
+        let mut event = PumpSwapBuyEvent::default();
+        fill_buy_accounts_with_count(&mut event, &get, accounts.len());
+        assert_eq!(event.pool_v2, accounts[24]);
+        assert_eq!(event.fee_recipient, Pubkey::default());
+        assert_eq!(event.fee_recipient_quote_token_account, Pubkey::default());
+        accounts.extend((0..3).map(|_| Pubkey::new_unique()));
+        let get = |index: usize| accounts.get(index).copied().unwrap_or_default();
+        let mut event = PumpSwapBuyEvent::default();
+        fill_buy_accounts_with_count(&mut event, &get, accounts.len());
+        assert_eq!(event.fee_recipient, Pubkey::default());
+    }
+
+    #[test]
+    fn fee_tail_is_not_misidentified_as_pool_v2() {
+        let mint = Pubkey::new_unique();
+        let expected = Pubkey::find_program_address(
+            &[b"pool-v2", mint.as_ref()],
+            &crate::instr::pump_amm::PROGRAM_ID_PUBKEY,
+        )
+        .0;
+        for (buy, pool_index, tail_len) in [
+            (true, 23, 26),
+            (true, 24, 27),
+            (false, 21, 24),
+            (false, 23, 26),
+        ] {
+            let mut accounts: Vec<_> = (0..tail_len).map(|_| Pubkey::new_unique()).collect();
+            accounts[3] = mint;
+            let parse_pool = |accounts: &[Pubkey]| {
+                let get = |index: usize| accounts.get(index).copied().unwrap_or_default();
+                if buy {
+                    let mut event = PumpSwapBuyEvent::default();
+                    fill_buy_accounts(&mut event, &get);
+                    event.pool_v2
+                } else {
+                    let mut event = PumpSwapSellEvent::default();
+                    fill_sell_accounts(&mut event, &get);
+                    event.pool_v2
+                }
+            };
+            assert_eq!(parse_pool(&accounts), Pubkey::default());
+            accounts[pool_index] = expected;
+            assert_eq!(parse_pool(&accounts), expected);
+        }
+    }
 }

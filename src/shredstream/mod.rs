@@ -14,7 +14,10 @@ pub mod proto {
     tonic::include_proto!("shredstream");
 }
 
-pub use client::{dropped_events, ShredStreamClient};
+pub use client::{dropped_events, AddressLookupResolver, AddressLookupStats, ShredStreamClient};
 pub use config::{JitoShredStreamConfig, ShredDecodeMode, ShredStreamConfig};
-pub use dex::{parse_transaction_dex_events, parse_transaction_dex_events_with_filter};
+pub use dex::{
+    parse_transaction_dex_events, parse_transaction_dex_events_best_effort,
+    parse_transaction_dex_events_with_filter, parse_transaction_dex_events_with_loaded_addresses,
+};
 pub use proto::*;
