@@ -361,3 +361,5 @@ CreatorFeeShare 账户。`cpmm_creator_fee` 提供 PDA 推导、旧收集调用�
 ### 真实 RPC 交易解析示例
 
 见 [examples 使用说明](examples/README.md)：实时 RPC 拉取、11 笔主网样本离线回放，以及原始指令和 token 余额校验。
+
+See [real RPC examples and validation limits](examples/PUMPSWAP_RPC.md).

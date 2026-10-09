@@ -1368,4 +1368,34 @@ mod tests {
             other => panic!("expected PumpFunBuy, got {other:?}"),
         }
     }
+
+    #[test]
+    fn pumpfun_create_v2_instruction_reads_holder_rewards_tail() {
+        let acc = accounts(16);
+        let event = parse_instruction(
+            &create_v2_data_with_holder_tail(),
+            &acc,
+            Signature::default(),
+            1,
+            0,
+            None,
+            99,
+        )
+        .expect("event");
+
+        match event {
+            DexEvent::PumpFunCreate(c) => {
+                assert_eq!(c.creator_fee_bps, 250);
+                assert!(c.is_holder_reward);
+            }
+            other => panic!("expected canonical PumpFunCreate, got {other:?}"),
+        }
+    }
+
+    fn create_v2_data_with_holder_tail() -> Vec<u8> {
+        let mut data = create_v2_data();
+        data.extend_from_slice(&250u64.to_le_bytes());
+        data.push(1);
+        data
+    }
 }
