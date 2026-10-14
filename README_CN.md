@@ -85,7 +85,7 @@ git clone https://github.com/0xfnzero/sol-shred-sdk
 
 ```toml
 # 添加到您的 Cargo.toml
-sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.3" }
+sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.4" }
 ```
 
 ### 使用 crates.io
@@ -93,7 +93,7 @@ sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.3" }
 ```toml
 # 添加到您的 Cargo.toml
 [dependencies]
-sol-shred-sdk = "4.0.3"
+sol-shred-sdk = "4.0.4"
 ```
 
 PumpFun create/create_v2 账户布局与 RPC 回归验证：[PUMPFUN_CREATE_LAYOUT.md](docs/PUMPFUN_CREATE_LAYOUT.md)。
@@ -363,6 +363,12 @@ CreatorFeeShare 账户。`cpmm_creator_fee` 提供 PDA 推导、旧收集调用�
 见 [examples 使用说明](examples/README.md)：实时 RPC 拉取、11 笔主网样本离线回放，以及原始指令和 token 余额校验。
 
 See [real RPC examples and validation limits](examples/PUMPSWAP_RPC.md).
+
+## v4.0.4 — Pump depth-2 compatibility
+
+Adds signed Pump depth-2 create-event replay coverage, including ALT-loaded accounts and executed logs. Existing event layouts and public parsing interfaces remain unchanged.
+
+Validation includes official Pump SDK 4.1.0 instruction comparisons, signed local LiteSVM simulations and SDK regressions. Local simulation state/config is synthetic; no funded transactions were broadcast and production latency was not measured.
 
 ## v4.0.3 — Signed transaction and hot-path hardening
 

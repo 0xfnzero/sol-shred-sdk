@@ -88,7 +88,7 @@ Add the dependency to your `Cargo.toml`:
 
 ```toml
 # Add to your Cargo.toml
-sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.3" }
+sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.4" }
 ```
 
 ### Use crates.io
@@ -96,7 +96,7 @@ sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.3" }
 ```toml
 # Add to your Cargo.toml
 [dependencies]
-sol-shred-sdk = "4.0.3"
+sol-shred-sdk = "4.0.4"
 ```
 
 PumpFun create/create_v2 account layout and RPC regression details: [PUMPFUN_CREATE_LAYOUT.md](docs/PUMPFUN_CREATE_LAYOUT.md).
@@ -455,6 +455,12 @@ For a synthetic completing buy, retain TradeEvent **and** PostCompleteBuyEvent a
 Reference: [pump-public-docs](https://github.com/pump-fun/pump-public-docs/tree/8cda1fa30ea658b20909d8aedf002047119388d2). Validation uses offline official IDL fixtures; no live trade is sent by the tests.
 
 See [real RPC examples and validation limits](examples/PUMPSWAP_RPC.md).
+
+## v4.0.4 — Pump depth-2 compatibility
+
+Adds signed Pump depth-2 create-event replay coverage, including ALT-loaded accounts and executed logs. Existing event layouts and public parsing interfaces remain unchanged.
+
+Validation includes official Pump SDK 4.1.0 instruction comparisons, signed local LiteSVM simulations and SDK regressions. Local simulation state/config is synthetic; no funded transactions were broadcast and production latency was not measured.
 
 ## v4.0.3 — Signed transaction and hot-path hardening
 
