@@ -57,6 +57,8 @@ fn signed_wires_preserve_every_account_and_byte_without_execution_metadata() {
             let DexEvent::RawInstruction(raw) = event else {
                 panic!()
             };
+            assert_eq!(raw.metadata.tx_index, 1);
+            assert_eq!(raw.metadata.grpc_recv_us, 2);
             assert_eq!(raw.program_id, all[ix.program_id_index as usize]);
             assert_eq!(
                 raw.accounts,

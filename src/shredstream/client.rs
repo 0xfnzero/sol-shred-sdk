@@ -472,6 +472,7 @@ fn process_dex_entry_batch(
     stats: &AddressLookupCounters,
 ) {
     let recv_us = now_micros();
+    // Message-local position only: the next Entries message starts at zero again.
     let mut tx_index = 0u64;
 
     for entry in batch.entries {
