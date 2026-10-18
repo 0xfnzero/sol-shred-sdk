@@ -1,6 +1,11 @@
 <div align="center">
 
-## v4.0.7 — Shred 原始指令透传
+## v4.0.8 — RawInstruction 协议过滤与 DEX 枚举
+
+修复原始指令绕过 DEX 订阅范围的问题。按单条指令引用的官方程序识别 DEX，使用 `RawInstructionDexType` 枚举；JSON 字符串保持不变。未知 router 不推断池子地址、买卖方向或方法版本。
+
+
+## v4.0.8 — Shred 原始指令透传
 
 兼容入口 `PumpfunEventParser` 和 `ShredStreamGrpc` 也透传 `PumpfunEvent::RawInstruction`。修复普通交易被丢弃、无关交易被合并到创建事件的问题；旧日志解析器按调用栈保留嵌套 Pump 交易腿，并丢弃失败父调用的事件。ShredStream gRPC 传输的是执行前交易，不具备 Yellowstone 执行元数据。
 
@@ -10,7 +15,9 @@
 
 事件包含 `program_id`、`instruction_index`、`accounts`、`account_indices`、`instruction_data` 和交易 metadata。账户保留原顺序与重复项；未解析 ALT 地址为 null/None，原始索引仍保留。使用缓存 loaded-addresses/resolver 补齐，热路径不请求 RPC。data 是完整原始字节，不要求已知布局。
 
-无过滤器时返回未知第三方指令；显式订阅 `RawInstruction` 时返回所有外层指令（含基础程序）。仅订阅 `PumpFunTrade` 不包含原始事件，需要同时订阅 `RawInstruction`。Streamer 对应 `DexEvent::RawInstructionEvent`，协议为 Common。账户包含 Pump 不证明发生 CPI，更不证明具体 buy 方法；事件数量也不是成交数量。
+运行 `cargo run --example raw_instruction_filter` 对比同一组已签名交易的 PumpFun、Raydium CPMM 与全量原始指令订阅；输出包含 `dexes`。
+
+无过滤器时返回未知第三方指令。宽泛交易/Swap 订阅（如 `PumpFunTrade`、`RaydiumCpmmSwap`）也返回关联该 DEX 的原始指令；买/卖方向订阅不推测方向。显式 `RawInstruction` 仅在未限制协议时返回全部外层指令，streamer 的协议限制始终生效；显式排除 `RawInstruction` 优先。`dex_type` 使用公开枚举 `RawInstructionDexType`（Go 为命名字符串类型与常量）；JSON 仍为 `"pumpfun"`、`"raydium_cpmm"` 等原有字符串。`dexes` 数组包含各关联 DEX 的 `{ dex_type, program_id, pool }`，只识别本条指令直接调用或账户中引用的 DEX 程序，不借用同笔其他指令的账户；多 DEX 包装保留所有关联。未知或未解析 ALT 中的程序不能匹配 DEX 订阅。`pool` 当前为 null：未知包装布局无法确定池子账户。program 引用不证明执行了 CPI，原始回调不是成交。
 
 已有 wrapper 适配函数仅作为显式调用的兼容接口保留，不参与默认 Shred 解码。以下已发布版本的历史说明描述旧行为。
 
@@ -100,7 +107,7 @@ git clone https://github.com/0xfnzero/sol-shred-sdk
 
 ```toml
 # 添加到您的 Cargo.toml
-sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.7" }
+sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.8" }
 ```
 
 ### 使用 crates.io
@@ -108,7 +115,7 @@ sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.7" }
 ```toml
 # 添加到您的 Cargo.toml
 [dependencies]
-sol-shred-sdk = "4.0.7"
+sol-shred-sdk = "4.0.8"
 ```
 
 PumpFun create/create_v2 账户布局与 RPC 回归验证：[PUMPFUN_CREATE_LAYOUT.md](docs/PUMPFUN_CREATE_LAYOUT.md)。

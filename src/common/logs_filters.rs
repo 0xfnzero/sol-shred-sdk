@@ -206,7 +206,22 @@ impl LogFilter {
         if !crate::shredstream::pump_ix::is_unknown_program_for_raw(&program_id) {
             return None;
         }
+        let dexes = crate::core::events::raw_instruction_dexes(
+            program_id,
+            &accounts
+                .iter()
+                .map(|i| keys.get(*i as usize).copied())
+                .collect::<Vec<_>>(),
+        );
+        // This legacy API is specifically a PumpFun subscription.
+        if !dexes
+            .iter()
+            .any(|dex| dex.dex_type == crate::core::events::RawInstructionDexType::PumpFun)
+        {
+            return None;
+        }
         Some(crate::core::events::RawInstructionEvent {
+            dexes,
             metadata: crate::core::EventMetadata {
                 signature,
                 slot,
@@ -777,7 +792,8 @@ mod tests {
         let parsed = LogFilter::parse_compiled_instruction_shreder(&response)
             .expect("well-formed protobuf transaction");
         assert!(
-            matches!(&parsed[..], [DexInstruction::RawInstruction(raw)] if raw.instruction_data == response.transaction.as_ref().unwrap().transaction.as_ref().unwrap().message.as_ref().unwrap().instructions[0].data)
+            parsed.is_empty(),
+            "unrelated programs must not reach PumpFun callbacks"
         );
     }
 
