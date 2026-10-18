@@ -1,4 +1,19 @@
 <div align="center">
+
+## v4.0.7 — raw Shred instructions
+
+The compatibility `PumpfunEventParser` and `ShredStreamGrpc` callbacks now forward `PumpfunEvent::RawInstruction`. Standalone trades are no longer dropped or merged into unrelated creates. The log-only compatibility parser preserves nested Pump legs and discards events from failed parent invocations. ShredStream gRPC transports pre-execution transactions, not Yellowstone execution metadata.
+
+Run `cargo run --example pump_raw_replay` for a freshly captured Delta transaction (2026-10-19, slot 458542546). It emits the visible raw instruction accounts/data without inferring an internal buy/sell. The shared decoder now also accepts current Anchor event CPI prefixes; Shred itself does not contain execution metadata.
+
+Default Shred parsing emits `RawInstruction` for unsupported third-party programs, including Rapid/Delta, without inferring direction, amounts, or internal buy methods. Infrastructure programs (System, Token, ATA, ComputeBudget, etc.) are omitted by default. Supported official DEX parsers are unchanged; official Pump/PumpSwap multi-hop instructions retain `PumpRouteIntent`.
+
+The payload contains `program_id`, `instruction_index`, `accounts`, `account_indices`, `instruction_data`, and transaction metadata. Account order and duplicates are preserved. Unresolved ALT addresses are null/None, with original indices retained; supply cached loaded addresses or a resolver. No hot-path RPC is performed. Data is copied verbatim without requiring a known layout.
+
+No filter returns unknown third-party instructions. Explicitly including `RawInstruction` returns every outer instruction, including infrastructure. A `PumpFunTrade`-only filter does not include raw events: subscribe to both types when needed. Streamer forwards `DexEvent::RawInstructionEvent` as Common. A Pump address in accounts does not prove a CPI or a particular buy method. Event count is not fill count.
+
+Wrapper adapter functions remain explicit compatibility helpers only; default Shred parsing does not call them. The released-version history below describes previous behavior.
+
     <h1>⚡ Sol Shred SDK</h1>
     <h3><em>Low-latency Solana raw shred decoding and multi-DEX event parsing</em></h3>
 </div>
@@ -88,7 +103,7 @@ Add the dependency to your `Cargo.toml`:
 
 ```toml
 # Add to your Cargo.toml
-sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.6" }
+sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.7" }
 ```
 
 ### Use crates.io
@@ -96,7 +111,7 @@ sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.6" }
 ```toml
 # Add to your Cargo.toml
 [dependencies]
-sol-shred-sdk = "4.0.6"
+sol-shred-sdk = "4.0.7"
 ```
 
 PumpFun create/create_v2 account layout and RPC regression details: [PUMPFUN_CREATE_LAYOUT.md](docs/PUMPFUN_CREATE_LAYOUT.md).

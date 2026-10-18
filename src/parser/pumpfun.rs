@@ -82,6 +82,11 @@ impl PumpfunEventParser {
 
         for instruction in instructions {
             match instruction {
+                DexInstruction::RawInstruction(mut raw) => {
+                    raw.metadata.slot = slot;
+                    callback(PumpfunEvent::RawInstruction(raw));
+                    emitted += 1;
+                }
                 DexInstruction::CreateToken(mut token) => {
                     let (limit, price, fee_merchant, fee) = LogFilter::parse_tip_info(transaction);
                     token.slot = slot;
@@ -104,7 +109,14 @@ impl PumpfunEventParser {
                 }
                 DexInstruction::UserTrade(mut trade) => {
                     trade.slot = slot;
-                    if token_info.is_some() {
+                    if token_info
+                        .as_ref()
+                        .is_some_and(|token| token.mint == trade.mint && token.user == trade.user)
+                        && trade.is_buy
+                        && dev_trade_info.as_ref().is_none_or(|t| {
+                            t.mint == trade.mint && t.user == trade.user && t.is_buy == trade.is_buy
+                        })
+                    {
                         merge_trade(&mut dev_trade_info, trade);
                     } else {
                         callback(PumpfunEvent::NewUserTrade(trade));
@@ -154,14 +166,22 @@ impl TransactionEventParser for PumpfunEventParser {
         &mut self,
         transaction: &VersionedTransaction,
         slot: u64,
-        _tx_index: u64,
-        _recv_us: i64,
-        emit: F,
+        tx_index: u64,
+        recv_us: i64,
+        mut emit: F,
     ) -> AnyResult<usize>
     where
         F: FnMut(Self::Event),
     {
-        self.process_transaction(transaction, slot, emit)
+        self.process_transaction(transaction, slot, |mut event| {
+            if let PumpfunEvent::RawInstruction(raw) = &mut event {
+                raw.metadata.tx_index = tx_index;
+                raw.metadata.grpc_recv_us = recv_us;
+                raw.metadata.recent_blockhash =
+                    Some(transaction.message.recent_blockhash().to_string());
+            }
+            emit(event);
+        })
     }
 }
 

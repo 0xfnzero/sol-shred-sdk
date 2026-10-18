@@ -15,7 +15,9 @@ use solana_sdk::transaction::VersionedTransaction;
 const COMPUTE_BUDGET_PROGRAM_ID: Pubkey =
     solana_sdk::pubkey!("ComputeBudget111111111111111111111111111111");
 const SYSTEM_PROGRAM_ID: Pubkey = solana_sdk::pubkey!("11111111111111111111111111111111");
+#[cfg(test)]
 const PUMPFUN_INVOKE_LOG: &str = "Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P invoke";
+#[cfg(test)]
 const PUMPFUN_SUCCESS_LOG: &str = "Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P success";
 const JITO_TIP_ACCOUNTS: [Pubkey; 8] = [
     solana_sdk::pubkey!("HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe"),
@@ -60,6 +62,19 @@ impl LogFilter {
         let accounts = versioned_tx.message.static_account_keys();
         let pump_index = accounts.iter().position(|key| key == &PUMPFUN_PROGRAM_ID);
         let mut instructions: Vec<DexInstruction> = Vec::new();
+        for (index, ix) in compiled_instructions.iter().enumerate() {
+            if let Some(raw) = Self::raw_instruction(
+                accounts,
+                usize::from(ix.program_id_index),
+                &ix.accounts,
+                &ix.data,
+                index,
+                versioned_tx.signatures.first().copied().unwrap_or_default(),
+                0,
+            ) {
+                instructions.push(DexInstruction::RawInstruction(Box::new(raw)));
+            }
+        }
         if let Some(index) = pump_index {
             for instruction in compiled_instructions {
                 if instruction.program_id_index as usize == index {
@@ -178,6 +193,36 @@ impl LogFilter {
         Ok(instructions)
     }
 
+    fn raw_instruction(
+        keys: &[Pubkey],
+        program_index: usize,
+        accounts: &[u8],
+        data: &[u8],
+        instruction_index: usize,
+        signature: solana_sdk::signature::Signature,
+        slot: u64,
+    ) -> Option<crate::core::events::RawInstructionEvent> {
+        let program_id = *keys.get(program_index)?;
+        if !crate::shredstream::pump_ix::is_unknown_program_for_raw(&program_id) {
+            return None;
+        }
+        Some(crate::core::events::RawInstructionEvent {
+            metadata: crate::core::EventMetadata {
+                signature,
+                slot,
+                ..Default::default()
+            },
+            program_id,
+            instruction_index,
+            accounts: accounts
+                .iter()
+                .map(|i| keys.get(usize::from(*i)).copied())
+                .collect(),
+            account_indices: accounts.to_vec(),
+            instruction_data: data.to_vec(),
+        })
+    }
+
     fn convert_proto_instruction(
         proto_ix: &crate::shredstream::CompiledInstruction,
     ) -> ClientResult<SolanaCompiledInstruction> {
@@ -228,6 +273,24 @@ impl LogFilter {
         let accounts = &message.account_keys;
         let accounts_pubkeys = Self::parse_proto_pubkeys(accounts)?;
         let mut instructions: Vec<DexInstruction> = Vec::new();
+        for (index, ix) in compiled_instructions.iter().enumerate() {
+            let signature = transaction
+                .signatures
+                .first()
+                .and_then(|bytes| solana_sdk::signature::Signature::try_from(bytes.as_slice()).ok())
+                .unwrap_or_default();
+            if let Some(raw) = Self::raw_instruction(
+                &accounts_pubkeys,
+                ix.program_id_index as usize,
+                &ix.accounts,
+                &ix.data,
+                index,
+                signature,
+                transaction_update.slot,
+            ) {
+                instructions.push(DexInstruction::RawInstruction(Box::new(raw)));
+            }
+        }
         if let Some(pump_index) = accounts_pubkeys
             .iter()
             .position(|key| key == &PUMPFUN_PROGRAM_ID)
@@ -538,84 +601,88 @@ impl LogFilter {
         logs: &[String],
         bot_wallet: Option<Pubkey>,
     ) -> ClientResult<Vec<DexInstruction>> {
-        let mut current_instruction = None;
-        let mut program_data = String::new();
-        let mut invocation_stack = Vec::new();
-        let mut pump_depth = 0usize;
-        let mut last_data_len = 0;
+        // Each invocation owns its events until it succeeds. Successful CPI legs
+        // are committed to their parent, so a failing router rolls them all back.
+        struct Frame {
+            program: String,
+            events: Vec<DexInstruction>,
+        }
+        let mut stack: Vec<Frame> = Vec::new();
         let mut instructions = Vec::new();
         for log in logs {
-            if log.starts_with("Program ") && log.contains(" invoke [") {
-                let is_pump = log.contains(PUMPFUN_INVOKE_LOG);
-                if is_pump {
-                    pump_depth += 1;
-                }
-                if is_pump && pump_depth == 1 {
-                    current_instruction = None;
-                    program_data.clear();
-                    last_data_len = 0;
-                }
-                invocation_stack.push(is_pump);
-                continue;
-            }
-
-            let active_outer_pump = pump_depth == 1 && invocation_stack.last() == Some(&true);
-            if active_outer_pump && log.contains("Program log: Instruction:") {
-                if log.contains("Create") {
-                    current_instruction = Some("create");
-                } else if log.contains("Buy") || log.contains("Sell") {
-                    current_instruction = Some("trade");
-                }
-                continue;
-            }
-
-            if active_outer_pump && log.starts_with("Program data: ") {
-                let data = log.trim_start_matches("Program data: ");
-                if data.len() > last_data_len {
-                    program_data = data.to_string();
-                    last_data_len = data.len();
-                }
-            }
-
-            let program_ended = log.starts_with("Program ")
-                && (log.ends_with(" success") || log.contains(" failed:"));
-            if program_ended {
-                let Some(was_pump) = invocation_stack.pop() else {
+            if let Some(rest) = log.strip_prefix("Program ") {
+                if let Some((program, depth)) = rest.split_once(" invoke [") {
+                    let Some(depth) = depth
+                        .strip_suffix(']')
+                        .and_then(|d| d.parse::<usize>().ok())
+                    else {
+                        continue;
+                    };
+                    if depth == 0 {
+                        continue;
+                    }
+                    stack.truncate(depth - 1);
+                    if stack.len() != depth - 1 {
+                        continue;
+                    }
+                    stack.push(Frame {
+                        program: program.to_owned(),
+                        events: Vec::new(),
+                    });
                     continue;
-                };
-                if was_pump {
-                    pump_depth = pump_depth.saturating_sub(1);
                 }
-                if was_pump && pump_depth == 0 && log.contains(PUMPFUN_SUCCESS_LOG) {
-                    if let Some(instruction_type) = current_instruction {
-                        if !program_data.is_empty() {
-                            match instruction_type {
-                                "create" => {
-                                    if let Ok(token_info) = parse_create_token_data(&program_data) {
-                                        instructions.push(DexInstruction::CreateToken(token_info));
-                                    }
-                                }
-                                "trade" => {
-                                    if let Ok(trade_info) = parse_trade_data(&program_data) {
-                                        if let Some(bot_wallet_pubkey) = bot_wallet {
-                                            if trade_info.user == bot_wallet_pubkey {
-                                                instructions
-                                                    .push(DexInstruction::BotTrade(trade_info));
-                                            } else {
-                                                instructions
-                                                    .push(DexInstruction::UserTrade(trade_info));
-                                            }
-                                        } else {
-                                            instructions
-                                                .push(DexInstruction::UserTrade(trade_info));
-                                        }
-                                    }
-                                }
-                                _ => {}
-                            }
+                let completion = rest
+                    .strip_suffix(" success")
+                    .map(|p| (p, true))
+                    .or_else(|| rest.split_once(" failed:").map(|(p, _)| (p, false)));
+                if let Some((program, success)) = completion {
+                    if stack.last().is_none_or(|f| f.program != program) {
+                        continue;
+                    }
+                    let frame = stack.pop().unwrap();
+                    if success {
+                        if let Some(parent) = stack.last_mut() {
+                            parent.events.extend(frame.events);
+                        } else {
+                            instructions.extend(frame.events);
                         }
+                    } else if stack.is_empty() {
+                        // A failed top-level instruction rolls back the transaction.
+                        instructions.clear();
+                        break;
+                    }
+                    continue;
+                }
+            }
+            let Some(frame) = stack.last_mut() else {
+                continue;
+            };
+            if frame.program != PUMPFUN_PROGRAM_ID.to_string() {
+                continue;
+            }
+            let Some(encoded) = log.strip_prefix("Program data: ") else {
+                continue;
+            };
+            use base64::Engine as _;
+            let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(encoded) else {
+                continue;
+            };
+            match bytes.get(..8) {
+                Some([189, 219, 127, 211, 78, 230, 97, 238]) => {
+                    if let Ok(trade) = parse_trade_data(encoded) {
+                        frame.events.push(if bot_wallet == Some(trade.user) {
+                            DexInstruction::BotTrade(trade)
+                        } else {
+                            DexInstruction::UserTrade(trade)
+                        });
                     }
                 }
+                Some([27, 114, 169, 77, 222, 235, 99, 118]) => {
+                    if let Ok(token) = parse_create_token_data(encoded) {
+                        frame.events.push(DexInstruction::CreateToken(token));
+                    }
+                }
+                _ => {}
             }
         }
 
@@ -658,6 +725,7 @@ mod tests {
 
     fn trade_log_data(user: Pubkey, trailing_bytes: usize) -> String {
         let mut data = vec![0u8; 129 + trailing_bytes];
+        data[..8].copy_from_slice(&[189, 219, 127, 211, 78, 230, 97, 238]);
         data[40..48].copy_from_slice(&11u64.to_le_bytes());
         data[48..56].copy_from_slice(&22u64.to_le_bytes());
         data[56] = 1;
@@ -708,7 +776,9 @@ mod tests {
 
         let parsed = LogFilter::parse_compiled_instruction_shreder(&response)
             .expect("well-formed protobuf transaction");
-        assert!(parsed.is_empty());
+        assert!(
+            matches!(&parsed[..], [DexInstruction::RawInstruction(raw)] if raw.instruction_data == response.transaction.as_ref().unwrap().transaction.as_ref().unwrap().message.as_ref().unwrap().instructions[0].data)
+        );
     }
 
     #[test]

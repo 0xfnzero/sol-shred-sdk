@@ -167,6 +167,7 @@ impl ShredStreamGrpc {
 
         for instruction in instructions {
             match instruction {
+                DexInstruction::RawInstruction(raw) => callback(PumpfunEvent::RawInstruction(raw)),
                 DexInstruction::CreateToken(mut token) => {
                     let (unit_limit, unit_price, fee_merchant, fee) =
                         tip_info.get_or_insert_with(|| LogFilter::parse_tip_info_shreder(tx_info));
@@ -191,11 +192,16 @@ impl ShredStreamGrpc {
                 }
                 DexInstruction::UserTrade(mut trade_info) => {
                     trade_info.slot = slot;
-                    if token_info.is_some() {
+                    if token_info.as_ref().is_some_and(|token| {
+                        token.mint == trade_info.mint && token.user == trade_info.user
+                    }) && trade_info.is_buy
+                    {
                         total_sol_amount = total_sol_amount.saturating_add(trade_info.sol_amount);
                         total_token_amount =
                             total_token_amount.saturating_add(trade_info.token_amount);
                         dev_trade_info = Some(trade_info);
+                    } else {
+                        callback(PumpfunEvent::NewUserTrade(trade_info));
                     }
                 }
                 DexInstruction::BotTrade(mut trade_info) => {
@@ -299,6 +305,48 @@ mod tests {
             events.as_slice(),
             [PumpfunEvent::NewToken(token)] if token.slot == 987_654
         ));
+    }
+
+    #[tokio::test]
+    async fn protobuf_processor_keeps_standalone_and_unrelated_trades() {
+        for with_create in [false, true] {
+            let mut response = create_response(vec![if with_create { 52 } else { 51 }; 64], 99);
+            let message = response
+                .transaction
+                .as_mut()
+                .unwrap()
+                .transaction
+                .as_mut()
+                .unwrap()
+                .message
+                .as_mut()
+                .unwrap();
+            message
+                .account_keys
+                .extend((0..4).map(|_| Pubkey::new_unique().to_bytes().to_vec()));
+            if !with_create {
+                message.instructions.clear();
+            }
+            let mut data = LogFilter::SELL_IX.to_vec();
+            data.extend_from_slice(&123u64.to_le_bytes());
+            data.extend_from_slice(&456u64.to_le_bytes());
+            message.instructions.push(CompiledInstruction {
+                program_id_index: 0,
+                accounts: (1..=12).collect(),
+                data,
+            });
+            let events = Mutex::new(Vec::new());
+            ShredStreamGrpc::process_pumpfun_transaction_shreder(&response, &|e| {
+                events.lock().unwrap().push(e)
+            })
+            .await
+            .unwrap();
+            let events = events.into_inner().unwrap();
+            assert_eq!(events.iter().filter(|e|matches!(e,PumpfunEvent::NewUserTrade(t) if !t.is_buy && t.token_amount==123)).count(),1);
+            assert!(!events
+                .iter()
+                .any(|e| matches!(e, PumpfunEvent::NewToken2 { .. })));
+        }
     }
 
     #[test]

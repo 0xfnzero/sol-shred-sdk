@@ -21,3 +21,4 @@ pub use dex::{
     parse_transaction_dex_events_with_filter, parse_transaction_dex_events_with_loaded_addresses,
 };
 pub use proto::*;
+pub use pump_ix::parse_transaction_unknown_instructions;

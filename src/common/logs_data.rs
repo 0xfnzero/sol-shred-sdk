@@ -5,6 +5,7 @@ use crate::common::error::{ClientError, ClientResult};
 
 #[derive(Debug)]
 pub enum DexInstruction {
+    RawInstruction(Box<crate::core::events::RawInstructionEvent>),
     CreateToken(CreateTokenInfo),
     BonkCreateToken(BonkCreateTokenInfo),
     BonkUserTrade(TradeRequest),

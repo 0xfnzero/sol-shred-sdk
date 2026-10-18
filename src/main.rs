@@ -140,6 +140,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     println!("mint: {} creator: {} payer: {} 不同", token.base_mint, token.creator, token.payer);
                 }
             },
+            PumpfunEvent::RawInstruction(raw) => {
+                println!("Raw instruction: {:?}", raw);
+            },
             PumpfunEvent::NewUserTrade(trade_info) => {
                 // println!("Received new trade event: {:?}", trade_info);
             },

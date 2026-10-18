@@ -8,6 +8,7 @@ pub const PROGRAM_DATA: &str = "Program data: ";
 
 #[derive(Debug)]
 pub enum PumpfunEvent {
+    RawInstruction(Box<crate::core::events::RawInstructionEvent>),
     NewToken(CreateTokenInfo),
     // NewDevTrade(TradeInfo),
     NewBonkToken {
@@ -43,34 +44,22 @@ pub enum SystemEvent {
 
 impl PumpfunEvent {
     pub fn parse_logs(logs: &[String]) -> (Option<CreateTokenInfo>, Option<TradeInfo>) {
-        let mut create_info: Option<CreateTokenInfo> = None;
-        let mut trade_info: Option<TradeInfo> = None;
-
-        for log in logs.iter().rev() {
-            let Some(encoded) = log.strip_prefix(PROGRAM_DATA) else {
-                continue;
-            };
-            let Ok(bytes) = general_purpose::STANDARD.decode(encoded) else {
-                continue;
-            };
-            let Some(payload) = bytes.get(8..) else {
-                continue;
-            };
-
-            if create_info.is_none() {
-                if let Ok(event) = CreateTokenInfo::from_bytes(payload) {
-                    create_info = Some(event);
-                    continue;
+        let mut create_info = None;
+        let mut trade_info = None;
+        // Compatibility API returns the last event of each kind. For all route
+        // legs use LogFilter::parse_instruction instead of collapsing to a tuple.
+        if let Ok(events) = crate::common::logs_filters::LogFilter::parse_instruction(logs, None) {
+            for event in events {
+                match event {
+                    crate::common::logs_data::DexInstruction::CreateToken(token) => {
+                        create_info = Some(token)
+                    }
+                    crate::common::logs_data::DexInstruction::UserTrade(trade)
+                    | crate::common::logs_data::DexInstruction::BotTrade(trade) => {
+                        trade_info = Some(trade)
+                    }
+                    _ => {}
                 }
-            }
-
-            if trade_info.is_none() {
-                if let Ok(event) = TradeInfo::from_bytes(payload) {
-                    trade_info = Some(event);
-                }
-            }
-            if create_info.is_some() && trade_info.is_some() {
-                break;
             }
         }
         (create_info, trade_info)
