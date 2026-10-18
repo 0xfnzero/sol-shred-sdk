@@ -259,11 +259,15 @@ fn dispatch_shred_outer(
     created_mints: &PumpMintSet,
     mayhem_mints: &PumpMintSet,
     events: &mut Vec<DexEvent>,
+    best_effort: bool,
 ) {
     if data.is_empty() {
         return;
     }
     if program_id_references_loaded_key(program_id_index, static_keys.len()) {
+        if !best_effort {
+            return;
+        }
         log::trace!(
             target: "sol_parser_sdk::shredstream",
             "program_id_index references an ALT-loaded account; trying discriminator-only best-effort parse"
@@ -290,6 +294,11 @@ fn dispatch_shred_outer(
         if filter.is_some_and(|f| !f.includes_pumpfun()) || !pumpfun_outer_data_may_parse(data) {
             return;
         }
+        if !best_effort
+            && !instruction_keys_resolved(program_id_index, ix_accounts, static_keys.len())
+        {
+            return;
+        }
         let accounts = build_shred_ix_accounts(static_keys, ix_accounts);
         if let Some(ev) = parse_pumpfun_instruction(
             data,
@@ -309,6 +318,11 @@ fn dispatch_shred_outer(
         return;
     }
     if !unified_outer_data_may_parse(*program_id, data) {
+        return;
+    }
+    if !best_effort
+        && !instruction_keys_resolved(program_id_index, ix_accounts, static_keys.len())
+    {
         return;
     }
     let accounts = build_shred_ix_accounts(static_keys, ix_accounts);
@@ -647,12 +661,7 @@ fn parse_transaction_pump_events_with_filter(
     } else {
         (PumpMintSet::new(), PumpMintSet::new())
     };
-    for ix in transaction.message.instructions() {
-        if !best_effort
-            && !instruction_keys_resolved(ix.program_id_index, &ix.accounts, static_keys.len())
-        {
-            continue;
-        }
+    for (instruction_index, ix) in transaction.message.instructions().iter().enumerate() {
         if !best_effort
             && static_keys.get(ix.program_id_index as usize) == Some(&PROGRAM_ID_PUBKEY)
             && ix.data.len() >= 8
@@ -671,6 +680,44 @@ fn parse_transaction_pump_events_with_filter(
                 continue;
             }
         }
+        if let Some(program) = static_keys.get(ix.program_id_index as usize) {
+            if crate::instr::pump_routes::may_parse(program, &ix.data) {
+                // Route adapters always require real account identities, even
+                // in compatibility mode. Never build a route with ALT placeholders.
+                if instruction_keys_resolved(ix.program_id_index, &ix.accounts, static_keys.len())
+                    && filter.is_none_or(|f| {
+                        f.includes_pump_route(if *program == PUMPSWAP_PROGRAM_ID {
+                            crate::core::events::PumpRouteKind::MultiHopSwap
+                        } else {
+                            crate::core::events::PumpRouteKind::RapidBuy
+                        })
+                    })
+                {
+                    let accounts = build_shred_ix_accounts(static_keys, &ix.accounts);
+                    let metadata = EventMetadata {
+                        signature,
+                        slot,
+                        tx_index,
+                        grpc_recv_us: recv_us,
+                        ..Default::default()
+                    };
+                    if let Some(intent) = crate::instr::pump_routes::parse(
+                        *program,
+                        &ix.data,
+                        &accounts,
+                        metadata,
+                        instruction_index,
+                    ) {
+                        push_filtered_shred_event(
+                            events,
+                            DexEvent::PumpRouteIntent(Box::new(intent)),
+                            filter,
+                        );
+                    }
+                }
+                continue;
+            }
+        }
         dispatch_shred_outer(
             ix.program_id_index,
             &ix.accounts,
@@ -684,6 +731,7 @@ fn parse_transaction_pump_events_with_filter(
             &created_mints,
             &mayhem_mints,
             events,
+            best_effort,
         );
     }
 }
@@ -2640,6 +2688,7 @@ mod tests {
             &PumpMintSet::new(),
             &PumpMintSet::new(),
             &mut events,
+            true,
         );
 
         assert_eq!(events.len(), 1);
@@ -2697,6 +2746,7 @@ mod tests {
             &PumpMintSet::new(),
             &PumpMintSet::new(),
             &mut events,
+            true,
         );
 
         assert_eq!(events.len(), 1);
@@ -2727,6 +2777,7 @@ mod tests {
             &PumpMintSet::new(),
             &PumpMintSet::new(),
             &mut events,
+            true,
         );
 
         assert_eq!(events.len(), 1);
@@ -2751,6 +2802,7 @@ mod tests {
             &PumpMintSet::new(),
             &PumpMintSet::new(),
             &mut events,
+            true,
         );
 
         assert_eq!(events.len(), 1);
@@ -2775,6 +2827,7 @@ mod tests {
             &PumpMintSet::new(),
             &PumpMintSet::new(),
             &mut events,
+            true,
         );
 
         assert_eq!(events.len(), 1);
@@ -2804,6 +2857,7 @@ mod tests {
             &PumpMintSet::new(),
             &PumpMintSet::new(),
             &mut events,
+            true,
         );
 
         assert_eq!(events.len(), 1);
@@ -2830,6 +2884,7 @@ mod tests {
             &PumpMintSet::new(),
             &PumpMintSet::new(),
             &mut events,
+            true,
         );
 
         assert!(events.is_empty());
