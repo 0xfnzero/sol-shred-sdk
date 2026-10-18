@@ -88,7 +88,7 @@ Add the dependency to your `Cargo.toml`:
 
 ```toml
 # Add to your Cargo.toml
-sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.5" }
+sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.6" }
 ```
 
 ### Use crates.io
@@ -96,7 +96,7 @@ sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.5" }
 ```toml
 # Add to your Cargo.toml
 [dependencies]
-sol-shred-sdk = "4.0.5"
+sol-shred-sdk = "4.0.6"
 ```
 
 PumpFun create/create_v2 account layout and RPC regression details: [PUMPFUN_CREATE_LAYOUT.md](docs/PUMPFUN_CREATE_LAYOUT.md).
@@ -456,6 +456,12 @@ Reference: [pump-public-docs](https://github.com/pump-fun/pump-public-docs/tree/
 
 See [real RPC examples and validation limits](examples/PUMPSWAP_RPC.md).
 
+## v4.0.6 — Pump route event support
+
+Route intents expose `is_buy` and `ix_name`, using existing trade field names and official IDL names. RapidBuy reports a buy intent and `buy_exact_quote_in_v2`; BuyPumpDelta reports only a buy intent. Multi-hop direction and unknown methods remain null. Currencies remain in `hops[].base_mint` / `quote_mint`. These hints do not confirm execution; filtering does not convert intents into trades.
+
+Streamer forwards complete route payloads as `DexEvent::PumpRouteIntentEvent` with protocol/event filtering. Old JSON defaults missing hints to unknown. Rust struct literals need the new fields; exhaustive streamer event matches need the new variant.
+
 ## v4.0.5 — Pump routes and offline replay
 
 Adds native Pump route-intent parsing for official multi-hop instructions and the exact RapidBuy/BuyPumpDelta wrapper layouts captured in reported transactions. Adds locally cached ALT resolution and rejects unresolved account identities by default, with explicit best-effort compatibility APIs where supported. Route intents expose instruction constraints and hop identities; confirmed execution amounts require execution metadata.
@@ -498,6 +504,28 @@ families and also match `PumpSwapTrade`. Direction-specific buy/sell and create
 filters do not match route intents. `exclude_types([PumpRouteIntent])` suppresses
 all intents. Consumers must handle the new `DexEvent::PumpRouteIntent` variant
 rather than assuming every callback is a trade variant.
+
+`filter: None` already includes route intents; changing the filter does not
+convert them into `PumpFunTrade`. For RapidBuy and BuyPumpDelta, `is_buy` is
+`Some(true)`, relative to `hops[0].base_mint`; the payment mint is
+`hops[0].quote_mint`. RapidBuy also exposes
+`ix_name = Some("buy_exact_quote_in_v2")` from its validated embedded
+instruction. BuyPumpDelta's expected method is unknown (`None`). Both hints
+are `None` for multi-hop routes. These are pre-execution hints, not proof of
+a successful CPI. Older serialized events deserialize with unknown hints.
+
+```rust,ignore
+if let DexEvent::PumpRouteIntent(intent) = event {
+    println!("buy intent: {:?}, expected method: {:?}",
+        intent.is_buy, intent.ix_name);
+    for hop in &intent.hops {
+        println!("base: {}, quote: {}", hop.base_mint, hop.quote_mint);
+    }
+}
+```
+
+The new optional fields preserve JSON read compatibility, but downstream Rust
+code constructing `PumpRouteIntentEvent` literals must supply the two fields.
 
 ALT addresses must come from a prewarmed, slot-aware local cache. Both SDKs expose
 `shredstream::parse_transaction_dex_events_with_loaded_addresses`: pass all loaded

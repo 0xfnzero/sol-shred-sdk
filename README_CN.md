@@ -85,7 +85,7 @@ git clone https://github.com/0xfnzero/sol-shred-sdk
 
 ```toml
 # 添加到您的 Cargo.toml
-sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.5" }
+sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.6" }
 ```
 
 ### 使用 crates.io
@@ -93,7 +93,7 @@ sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.5" }
 ```toml
 # 添加到您的 Cargo.toml
 [dependencies]
-sol-shred-sdk = "4.0.5"
+sol-shred-sdk = "4.0.6"
 ```
 
 PumpFun create/create_v2 账户布局与 RPC 回归验证：[PUMPFUN_CREATE_LAYOUT.md](docs/PUMPFUN_CREATE_LAYOUT.md)。
@@ -363,6 +363,12 @@ CreatorFeeShare 账户。`cpmm_creator_fee` 提供 PDA 推导、旧收集调用�
 见 [examples 使用说明](examples/README.md)：实时 RPC 拉取、11 笔主网样本离线回放，以及原始指令和 token 余额校验。
 
 See [real RPC examples and validation limits](examples/PUMPSWAP_RPC.md).
+
+## v4.0.6 — Pump 路由事件完善
+
+路由意图新增 `is_buy` 和 `ix_name`，沿用交易事件字段名和官方 IDL 方法名。RapidBuy 为买入意图，方法为 `buy_exact_quote_in_v2`；BuyPumpDelta 仅确定买入方向；多跳方向与未知方法保持为空。币种仍从 `hops[].base_mint` / `quote_mint` 获取。这些信息不代表已成交，过滤器也不会将路由意图转换为交易事件。
+
+Streamer 现在通过 `DexEvent::PumpRouteIntentEvent` 转发完整路由字段并支持过滤。旧 JSON 缺少新字段时保持未知；Rust 结构体字面量需补齐新字段，穷举 streamer 事件的代码需处理新变体。
 
 ## v4.0.5 — Pump routes and offline replay
 
