@@ -1,4 +1,8 @@
+Current version: **5.0.0**. SDK, native-language tests, examples and documentation are synchronized in this release. See [RELEASE_NOTES.md](RELEASE_NOTES.md) for migration details.
+
 <div align="center">
+
+[Wrapped Pump.fun: offline rules, hot-path boundaries, and real-transaction replays](docs/wrapped-pumpfun.md)
 
 ## v4.0.9 — Shred metadata passthrough and ordering scope
 
@@ -117,7 +121,7 @@ Add the dependency to your `Cargo.toml`:
 
 ```toml
 # Add to your Cargo.toml
-sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.9" }
+sol-shred-sdk = { path = "./sol-shred-sdk", version = "5.0.0" }
 ```
 
 ### Use crates.io
@@ -125,7 +129,7 @@ sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.9" }
 ```toml
 # Add to your Cargo.toml
 [dependencies]
-sol-shred-sdk = "4.0.9"
+sol-shred-sdk = "5.0.0"
 ```
 
 PumpFun create/create_v2 account layout and RPC regression details: [PUMPFUN_CREATE_LAYOUT.md](docs/PUMPFUN_CREATE_LAYOUT.md).

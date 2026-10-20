@@ -294,7 +294,21 @@ fn malformed_official_routes_are_rejected_and_unknown_programs_stay_raw() {
             *instructions_mut(&mut malformed) = vec![ix];
             let events = resolved(&malformed, &f, None);
             if mutate == 1 {
-                assert!(matches!(&events[..], [DexEvent::RawInstruction(_)]));
+                assert_eq!(events.len(), 1);
+                match &events[0] {
+                    DexEvent::PumpFunTrade(t) => {
+                        assert_eq!(t.parse_status, sol_shred_sdk::core::events::TradeParseStatus::Unresolved);
+                        let raw = t.third_program.as_ref().unwrap();
+                        assert_eq!(raw.program_id, malformed.message.static_account_keys()[0]);
+                        assert_eq!(raw.instruction_data, original.data);
+                        assert_eq!((t.sol_amount, t.token_amount, t.quote_amount), (0, 0, 0));
+                    }
+                    DexEvent::RawInstruction(raw) => {
+                        assert_eq!(raw.program_id, malformed.message.static_account_keys()[0]);
+                        assert_eq!(raw.instruction_data, original.data);
+                    }
+                    other => panic!("unexpected decoded wrapper: {other:?}"),
+                }
             } else {
                 assert!(events.is_empty());
             }

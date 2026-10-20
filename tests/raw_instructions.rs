@@ -1,22 +1,17 @@
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde_json::Value;
 use sol_shred_sdk::{
-    core::events::DexEvent,
+    core::events::{DexEvent, PumpFunParseStatus},
     grpc::{EventType, EventTypeFilter},
     shredstream::parse_transaction_dex_events_with_loaded_addresses,
 };
-use sol_shred_sdk::{message::VersionedMessage, transaction::VersionedTransaction, Pubkey};
+use sol_shred_sdk::{message::VersionedMessage, Pubkey, transaction::VersionedTransaction};
 
 fn fixtures() -> Vec<Value> {
     serde_json::from_str(include_str!("fixtures/shred_routes/raw.json")).unwrap()
 }
 fn keys(f: &Value, name: &str) -> Vec<Pubkey> {
-    f[name]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|k| k.as_str().unwrap().parse().unwrap())
-        .collect()
+    f[name].as_array().unwrap().iter().map(|k| k.as_str().unwrap().parse().unwrap()).collect()
 }
 fn parse(tx: &VersionedTransaction, f: &Value, filter: Option<&EventTypeFilter>) -> Vec<DexEvent> {
     let mut events = vec![];
@@ -40,10 +35,7 @@ fn signed_wires_preserve_every_account_and_byte_without_execution_metadata() {
         let tx: VersionedTransaction =
             wincode::deserialize_exact(&STANDARD.decode(f["wire"].as_str().unwrap()).unwrap())
                 .unwrap();
-        assert_eq!(
-            tx.signatures[0].to_string(),
-            f["signature"].as_str().unwrap()
-        );
+        assert_eq!(tx.signatures[0].to_string(), f["signature"].as_str().unwrap());
         for (sig, key) in tx.signatures.iter().zip(tx.message.static_account_keys()) {
             assert!(sig.verify(key.as_ref(), &tx.message.serialize()));
         }
@@ -54,18 +46,13 @@ fn signed_wires_preserve_every_account_and_byte_without_execution_metadata() {
         let events = parse(&tx, &f, Some(&filter));
         assert_eq!(events.len(), tx.message.instructions().len());
         for (event, ix) in events.iter().zip(tx.message.instructions()) {
-            let DexEvent::RawInstruction(raw) = event else {
-                panic!()
-            };
+            let DexEvent::RawInstruction(raw) = event else { panic!() };
             assert_eq!(raw.metadata.tx_index, 1);
             assert_eq!(raw.metadata.grpc_recv_us, 2);
             assert_eq!(raw.program_id, all[ix.program_id_index as usize]);
             assert_eq!(
                 raw.accounts,
-                ix.accounts
-                    .iter()
-                    .map(|i| Some(all[*i as usize]))
-                    .collect::<Vec<_>>()
+                ix.accounts.iter().map(|i| Some(all[*i as usize])).collect::<Vec<_>>()
             );
             assert_eq!(raw.account_indices, ix.accounts);
             assert_eq!(raw.instruction_data, ix.data);
@@ -80,17 +67,20 @@ fn signed_wires_preserve_every_account_and_byte_without_execution_metadata() {
             assert_eq!(
                 default
                     .iter()
-                    .filter(|e| matches!(e, DexEvent::RawInstruction(_)))
+                    .filter(|e| matches!(
+                        e,
+                        DexEvent::RawInstruction(_) | DexEvent::PumpFunTrade(_)
+                    ))
                     .count(),
                 count as usize
             );
-            assert!(!default.iter().any(|e| matches!(
-                e,
-                DexEvent::PumpFunTrade(_)
-                    | DexEvent::PumpFunBuy(_)
-                    | DexEvent::PumpFunSell(_)
-                    | DexEvent::PumpFunBuyExactSolIn(_)
-            )));
+            for e in &default {
+                if let DexEvent::PumpFunTrade(t) = e {
+                    assert_eq!(t.parse_status, PumpFunParseStatus::Unresolved);
+                    assert_eq!((t.sol_amount, t.token_amount), (0, 0));
+                    assert!(t.ix_name.is_empty());
+                }
+            }
         }
         if f["signature"].as_str().unwrap().starts_with("3nMX")
             || f["signature"].as_str().unwrap().starts_with("2r4u")
@@ -98,24 +88,21 @@ fn signed_wires_preserve_every_account_and_byte_without_execution_metadata() {
             let default = parse(&tx, &f, None);
             assert_eq!(
                 default.len(),
-                if f["signature"].as_str().unwrap().starts_with("3nMX") {
-                    2
-                } else {
-                    3
-                }
+                if f["signature"].as_str().unwrap().starts_with("3nMX") { 2 } else { 3 }
             );
             assert!(default
                 .iter()
-                .all(|e| matches!(e, DexEvent::RawInstruction(_))));
-            let selected = parse(
-                &tx,
-                &f,
-                Some(&EventTypeFilter::include_only(vec![
-                    EventType::PumpFunTrade,
-                ])),
-            );
+                .all(|e| matches!(e, DexEvent::RawInstruction(_) | DexEvent::PumpFunTrade(_))));
+            let selected =
+                parse(&tx, &f, Some(&EventTypeFilter::include_only(vec![EventType::PumpFunTrade])));
             assert!(!selected.is_empty());
-            assert!(selected.iter().all(|e| matches!(e, DexEvent::RawInstruction(raw) if raw.dexes.iter().any(|d| d.dex_type == sol_shred_sdk::core::events::RawInstructionDexType::PumpFun))));
+            assert!(selected.iter().all(|e| matches!(e, DexEvent::PumpFunTrade(t) if t.parse_status == PumpFunParseStatus::Unresolved && t.third_program.is_some())));
+            for direction in
+                [EventType::PumpFunBuy, EventType::PumpFunSell, EventType::PumpFunBuyExactSolIn]
+            {
+                assert!(parse(&tx, &f, Some(&EventTypeFilter::include_only(vec![direction])))
+                    .is_empty());
+            }
         }
     }
 }
@@ -144,12 +131,10 @@ fn unknown_programs_changed_layouts_and_unresolved_accounts_stay_raw() {
         1,
         2,
         3,
-        None,
+        Some(&EventTypeFilter::include_only(vec![EventType::RawInstruction])),
         &mut events,
     );
-    let [DexEvent::RawInstruction(raw)] = &events[..] else {
-        panic!()
-    };
+    let [DexEvent::RawInstruction(raw)] = &events[..] else { panic!() };
     assert_eq!(raw.instruction_data, ix.data);
     assert_eq!(raw.account_indices, ix.accounts);
     assert_eq!(raw.accounts.last(), Some(&None));
@@ -160,59 +145,23 @@ fn unknown_programs_changed_layouts_and_unresolved_accounts_stay_raw() {
 #[test]
 fn raw_dex_subscriptions_are_instruction_local_and_never_infer_pool_layout() {
     use sol_shred_sdk::grpc::program_ids::*;
-    use sol_shred_sdk::signature::Signature;
     use solana_instruction::{AccountMeta, Instruction};
     use solana_message::Message;
+    use sol_shred_sdk::signature::Signature;
     let wrapper = Pubkey::new_unique();
     let payer = Pubkey::new_unique();
     let pairs = [
         (PUMPFUN_PROGRAM, EventType::PumpFunTrade, "pumpfun"),
         (PUMPSWAP_PROGRAM, EventType::PumpSwapTrade, "pumpswap"),
-        (
-            RAYDIUM_LAUNCHLAB_PROGRAM,
-            EventType::RaydiumLaunchlabTrade,
-            "raydium_launchlab",
-        ),
-        (
-            RAYDIUM_CPMM_PROGRAM,
-            EventType::RaydiumCpmmSwap,
-            "raydium_cpmm",
-        ),
-        (
-            RAYDIUM_CLMM_PROGRAM,
-            EventType::RaydiumClmmSwap,
-            "raydium_clmm",
-        ),
-        (
-            RAYDIUM_AMM_V4_PROGRAM,
-            EventType::RaydiumAmmV4Swap,
-            "raydium_amm_v4",
-        ),
-        (
-            ORCA_WHIRLPOOL_PROGRAM,
-            EventType::OrcaWhirlpoolSwap,
-            "orca_whirlpool",
-        ),
-        (
-            METEORA_POOLS_PROGRAM,
-            EventType::MeteoraPoolsSwap,
-            "meteora_pools",
-        ),
-        (
-            METEORA_DAMM_V2_PROGRAM,
-            EventType::MeteoraDammV2Swap,
-            "meteora_damm_v2",
-        ),
-        (
-            METEORA_DLMM_PROGRAM,
-            EventType::MeteoraDlmmSwap,
-            "meteora_dlmm",
-        ),
-        (
-            METEORA_DBC_PROGRAM,
-            EventType::MeteoraDbcSwap,
-            "meteora_dbc",
-        ),
+        (RAYDIUM_LAUNCHLAB_PROGRAM, EventType::RaydiumLaunchlabTrade, "raydium_launchlab"),
+        (RAYDIUM_CPMM_PROGRAM, EventType::RaydiumCpmmSwap, "raydium_cpmm"),
+        (RAYDIUM_CLMM_PROGRAM, EventType::RaydiumClmmSwap, "raydium_clmm"),
+        (RAYDIUM_AMM_V4_PROGRAM, EventType::RaydiumAmmV4Swap, "raydium_amm_v4"),
+        (ORCA_WHIRLPOOL_PROGRAM, EventType::OrcaWhirlpoolSwap, "orca_whirlpool"),
+        (METEORA_POOLS_PROGRAM, EventType::MeteoraPoolsSwap, "meteora_pools"),
+        (METEORA_DAMM_V2_PROGRAM, EventType::MeteoraDammV2Swap, "meteora_damm_v2"),
+        (METEORA_DLMM_PROGRAM, EventType::MeteoraDlmmSwap, "meteora_dlmm"),
+        (METEORA_DBC_PROGRAM, EventType::MeteoraDbcSwap, "meteora_dbc"),
     ];
     for (program, event_type, name) in pairs {
         let tx = VersionedTransaction {
@@ -228,11 +177,7 @@ fn raw_dex_subscriptions_are_instruction_local_and_never_infer_pool_layout() {
                         data: vec![255],
                     },
                     // This instruction can see none of the DEX accounts, although the transaction can.
-                    Instruction {
-                        program_id: wrapper,
-                        accounts: vec![],
-                        data: vec![254],
-                    },
+                    Instruction { program_id: wrapper, accounts: vec![], data: vec![254] },
                 ],
                 Some(&payer),
             )),
@@ -248,9 +193,18 @@ fn raw_dex_subscriptions_are_instruction_local_and_never_infer_pool_layout() {
             Some(&filter),
             &mut events,
         );
-        let [DexEvent::RawInstruction(raw)] = &events[..] else {
-            panic!("{name}: {events:?}")
-        };
+        if name == "pumpfun" {
+            let [DexEvent::PumpFunTrade(t)] = &events[..] else { panic!("{events:?}") };
+            assert_eq!(t.parse_status, PumpFunParseStatus::Unresolved);
+            let raw = t.third_program.as_ref().unwrap();
+            assert_eq!(raw.instruction_index, 0);
+            assert_eq!(raw.accounts, vec![Some(program), Some(program)]);
+            assert!(filter.should_include_dex_event(&events[0]));
+            assert!(!EventTypeFilter::include_only(vec![EventType::PumpFunSell])
+                .should_include_dex_event(&events[0]));
+            continue;
+        }
+        let [DexEvent::RawInstruction(raw)] = &events[..] else { panic!("{name}: {events:?}") };
         assert_eq!(raw.instruction_index, 0);
         assert_eq!(raw.dexes.len(), 1);
         assert_eq!(raw.dexes[0].dex_type.as_str(), name);
@@ -277,12 +231,7 @@ fn raw_multi_dex_and_alt_boundaries() {
     use sol_shred_sdk::grpc::program_ids::*;
     let dexes = raw_instruction_dexes(
         Pubkey::new_unique(),
-        &[
-            Some(PUMPFUN_PROGRAM),
-            None,
-            Some(RAYDIUM_CPMM_PROGRAM),
-            Some(PUMPFUN_PROGRAM),
-        ],
+        &[Some(PUMPFUN_PROGRAM), None, Some(RAYDIUM_CPMM_PROGRAM), Some(PUMPFUN_PROGRAM)],
     );
     assert_eq!(dexes.len(), 2);
     for event in [EventType::PumpFunTrade, EventType::RaydiumCpmmSwap] {
@@ -303,4 +252,69 @@ fn raw_multi_dex_and_alt_boundaries() {
         &[],
         &EventTypeFilter::include_only(vec![EventType::RawInstruction])
     ));
+}
+
+#[test]
+fn unresolved_candidates_preserve_missing_keys_and_respect_exclusion() {
+    use sol_shred_sdk::core::events::PumpFunParseStatus;
+    use solana_instruction::{AccountMeta, Instruction};
+    use solana_message::Message;
+    use sol_shred_sdk::signature::Signature;
+    let wrapper = Pubkey::new_unique();
+    let pump = sol_shred_sdk::grpc::program_ids::PUMPFUN_PROGRAM;
+    let mut message = Message::new(
+        &[Instruction {
+            program_id: wrapper,
+            accounts: vec![AccountMeta::new_readonly(pump, false)],
+            data: vec![7, 9, 11],
+        }],
+        Some(&Pubkey::new_unique()),
+    );
+    message.instructions[0].accounts.push(255);
+    let tx = VersionedTransaction {
+        signatures: vec![Signature::default()],
+        message: VersionedMessage::Legacy(message),
+    };
+    let parse = |filter: Option<&EventTypeFilter>| {
+        let mut out = vec![];
+        sol_shred_sdk::shredstream::parse_transaction_dex_events_with_filter(
+            &tx,
+            tx.signatures[0],
+            12,
+            34,
+            56,
+            filter,
+            &mut out,
+        );
+        out
+    };
+    let events = parse(None);
+    let [DexEvent::PumpFunTrade(t)] = &events[..] else { panic!("{events:?}") };
+    assert_eq!(t.parse_status, PumpFunParseStatus::Unresolved);
+    assert_eq!((t.metadata.slot, t.metadata.tx_index, t.metadata.grpc_recv_us), (12, 34, 56));
+    let raw = t.third_program.as_ref().unwrap();
+    assert_eq!(raw.accounts, vec![Some(pump), None]);
+    assert_eq!(raw.instruction_data, vec![7, 9, 11]);
+    let json = serde_json::to_value(t).unwrap();
+    assert!(json["third_program"].get("metadata").is_none());
+    assert!(json["third_program"].get("dexes").is_none());
+    assert_eq!(
+        serde_json::from_value::<sol_shred_sdk::core::events::PumpFunTradeEvent>(json)
+            .unwrap()
+            .third_program
+            .as_ref(),
+        Some(raw)
+    );
+    for filter in [
+        EventTypeFilter::include_only(vec![EventType::PumpFunBuy]),
+        EventTypeFilter::include_only(vec![EventType::PumpFunSell]),
+        EventTypeFilter::include_only(vec![EventType::RaydiumCpmmSwap]),
+        EventTypeFilter::exclude_types(vec![EventType::PumpFunTrade]),
+        EventTypeFilter {
+            include_only: Some(vec![EventType::PumpFunTrade]),
+            exclude_types: Some(vec![EventType::PumpFunTrade]),
+        },
+    ] {
+        assert!(parse(Some(&filter)).is_empty(), "{filter:?}");
+    }
 }

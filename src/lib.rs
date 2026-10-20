@@ -51,6 +51,8 @@ pub mod shred;
 pub mod shredstream;
 pub mod stonkfun_registry;
 pub mod transaction_route;
+pub mod wrapped_pumpfun_parser;
+pub mod wrapped_pumpfun_rpc_analyzer;
 
 pub use common::logs_events::PumpfunEvent;
 pub use common::AnyResult;

@@ -163,6 +163,8 @@ fn parse_trade_instruction(
 
     Some(DexEvent::RaydiumLaunchlabTrade(
         RaydiumLaunchlabTradeEvent {
+            third_program: None,
+            parse_status: Default::default(),
             metadata,
             pool_state,
             user: get_account(accounts, 0).unwrap_or_default(),

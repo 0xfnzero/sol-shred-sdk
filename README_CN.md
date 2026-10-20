@@ -1,4 +1,8 @@
+当前版本：**5.0.0**。本轮同步 SDK、原生语言测试、示例及文档。升级说明见 [RELEASE_NOTES.md](RELEASE_NOTES.md)。
+
 <div align="center">
+
+[第三方 Pump.fun 包装指令：离线规则、热路径边界与真实交易回放](docs/wrapped-pumpfun.md)
 
 ## v4.0.9 — Shred 元数据透传与顺序范围
 
@@ -114,7 +118,7 @@ git clone https://github.com/0xfnzero/sol-shred-sdk
 
 ```toml
 # 添加到您的 Cargo.toml
-sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.9" }
+sol-shred-sdk = { path = "./sol-shred-sdk", version = "5.0.0" }
 ```
 
 ### 使用 crates.io
@@ -122,7 +126,7 @@ sol-shred-sdk = { path = "./sol-shred-sdk", version = "4.0.9" }
 ```toml
 # 添加到您的 Cargo.toml
 [dependencies]
-sol-shred-sdk = "4.0.9"
+sol-shred-sdk = "5.0.0"
 ```
 
 PumpFun create/create_v2 账户布局与 RPC 回归验证：[PUMPFUN_CREATE_LAYOUT.md](docs/PUMPFUN_CREATE_LAYOUT.md)。

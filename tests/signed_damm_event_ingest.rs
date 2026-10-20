@@ -154,9 +154,22 @@ fn valid_signatures_do_not_make_malformed_or_wrong_program_events_parse() {
         let mut wrong = valid.clone();
         wrong.program_id = Pubkey::new_from_array([99; 32]);
         for invalid in [short, long, prefix, wrong] {
+            let unknown = invalid.program_id != valid.program_id;
+            let original_data = invalid.data.clone();
             let tx = signed(&[invalid, valid.clone()], false);
+            let events = parse(&tx);
+            let raw: Vec<_> = events.iter().filter_map(|event| {
+                if let DexEvent::RawInstruction(raw) = event { Some(raw) } else { None }
+            }).collect();
+            assert_eq!(raw.len(), usize::from(unknown));
+            if let Some(raw) = raw.first() {
+                assert_eq!(raw.program_id, Pubkey::new_from_array([99; 32]));
+                assert_eq!(raw.instruction_index, 0);
+                assert_eq!(raw.instruction_data, original_data);
+                assert!(raw.dexes.is_empty());
+            }
             assert_eq!(
-                parse(&tx).len(),
+                events.len() - raw.len(),
                 1,
                 "invalid event must not hide its valid neighbor"
             );
