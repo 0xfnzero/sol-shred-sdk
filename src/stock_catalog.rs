@@ -126,7 +126,7 @@ mod tests {
     #[test]
     fn defaults_are_distinct_and_have_only_verified_bridge_quote_assets() {
         let c = StockTokenCatalog::screened_defaults();
-        assert_eq!((c.tokens.len(), c.pools.len()), (34, 63));
+        assert_eq!((c.tokens.len(), c.pools.len()), (33, 58));
         let mut seen = std::collections::HashSet::new();
         for p in c.pools {
             assert!(seen.insert(p.pool));
