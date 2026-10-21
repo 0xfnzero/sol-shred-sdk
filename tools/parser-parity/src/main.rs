@@ -210,17 +210,16 @@ fn main() {
                         },
                     );
                 }
-                let expected =
-                    sol_parser_sdk::grpc::instruction_parser::parse_instructions_enhanced(
-                        &TransactionStatusMeta::default(),
-                        &grpc_tx,
-                        Default::default(),
-                        42,
-                        3,
-                        None,
-                        0,
-                        None,
-                    );
+                let expected = parse_outer_reference(
+                    &TransactionStatusMeta::default(),
+                    &grpc_tx,
+                    Default::default(),
+                    42,
+                    3,
+                    None,
+                    0,
+                    None,
+                );
                 if expected.is_empty()
                     && file == "orca_whirlpool.json"
                     && matches!(
@@ -1051,20 +1050,19 @@ fn main() {
                         ]),
                     ),
                 ] {
-                    let filtered_expected =
-                        sol_parser_sdk::grpc::instruction_parser::parse_instructions_enhanced(
-                            &TransactionStatusMeta::default(),
-                            &grpc_tx,
-                            Default::default(),
-                            42,
-                            3,
-                            None,
-                            0,
-                            Some(&reference_filter),
-                        )
-                        .into_iter()
-                        .map(|e| reference_filter.normalize_dex_event(e))
-                        .collect::<Vec<_>>();
+                    let filtered_expected = parse_outer_reference(
+                        &TransactionStatusMeta::default(),
+                        &grpc_tx,
+                        Default::default(),
+                        42,
+                        3,
+                        None,
+                        0,
+                        Some(&reference_filter),
+                    )
+                    .into_iter()
+                    .map(|e| reference_filter.normalize_dex_event(e))
+                    .collect::<Vec<_>>();
                     let mut filtered_actual = vec![];
                     sol_shred_sdk::parse_transaction_dex_events_with_filter(
                         &transaction,
@@ -1116,17 +1114,16 @@ fn main() {
                         accounts: extra.accounts,
                         data: extra.data,
                     });
-                let multi_expected =
-                    sol_parser_sdk::grpc::instruction_parser::parse_instructions_enhanced(
-                        &TransactionStatusMeta::default(),
-                        &multi_grpc,
-                        Default::default(),
-                        42,
-                        3,
-                        None,
-                        0,
-                        None,
-                    );
+                let multi_expected = parse_outer_reference(
+                    &TransactionStatusMeta::default(),
+                    &multi_grpc,
+                    Default::default(),
+                    42,
+                    3,
+                    None,
+                    0,
+                    None,
+                );
                 let mut multi_actual = vec![];
                 sol_shred_sdk::parse_transaction_dex_events(
                     &multi_tx,
@@ -1244,10 +1241,25 @@ fn main() {
                             let shred_filter = sol_shred_sdk::EventTypeFilter::include_only(vec![
                                 sol_shred_sdk::EventType::PumpFunTrade,
                             ]);
-                            let expected = sol_parser_sdk::grpc::instruction_parser::parse_instructions_enhanced(
-                                &TransactionStatusMeta::default(), &create_grpc, Default::default(), 42, 3, None, 0,
+                            let expected = parse_outer_reference(
+                                &TransactionStatusMeta::default(),
+                                &create_grpc,
+                                Default::default(),
+                                42,
+                                3,
+                                None,
+                                0,
                                 only_buy.then_some(&reference_filter),
-                            ).into_iter().map(|e| if only_buy { reference_filter.normalize_dex_event(e) } else { e }).collect::<Vec<_>>();
+                            )
+                            .into_iter()
+                            .map(|e| {
+                                if only_buy {
+                                    reference_filter.normalize_dex_event(e)
+                                } else {
+                                    e
+                                }
+                            })
+                            .collect::<Vec<_>>();
                             let mut actual = vec![];
                             sol_shred_sdk::parse_transaction_dex_events_with_filter(
                                 &create_tx,
@@ -1532,7 +1544,7 @@ fn main() {
                 .collect(),
         }),
     };
-    let expected = sol_parser_sdk::grpc::instruction_parser::parse_instructions_enhanced(
+    let expected = parse_outer_reference(
         &meta,
         &Some(grpc_tx),
         signature.as_ref().try_into().expect("signature bytes"),
@@ -1586,6 +1598,10 @@ fn main() {
             continue;
         }
         let json: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        // This directory also contains catalogs and grouped regression fixtures.
+        if !json.get("transaction").is_some_and(Value::is_array) {
+            continue;
+        }
         let rpc: solana_transaction_status::EncodedConfirmedTransactionWithStatusMeta =
             serde_json::from_value(json.clone()).unwrap();
         let (source_meta, grpc_tx) = sol_parser_sdk::convert_rpc_to_grpc(&rpc).unwrap();
@@ -1609,7 +1625,7 @@ fn main() {
             .map(|b| Pubkey::from(<[u8; 32]>::try_from(b.as_slice()).unwrap()))
             .collect();
         let signature = tx.signatures[0];
-        let expected = sol_parser_sdk::grpc::instruction_parser::parse_instructions_enhanced(
+        let expected = parse_outer_reference(
             &meta,
             &Some(grpc_tx),
             signature.as_ref().try_into().expect("signature bytes"),
@@ -1663,6 +1679,61 @@ fn main() {
     }
 }
 
+// Compare the two outer-instruction parsers. Execution-aware gRPC deliberately
+// differs: it must not report input budgets as fills or emit unresolved wrappers.
+fn parse_outer_reference(
+    meta: &TransactionStatusMeta,
+    transaction: &Option<Transaction>,
+    signature: Signature,
+    slot: u64,
+    tx_index: u64,
+    _block_time: Option<i64>,
+    recv_us: i64,
+    filter: Option<&sol_parser_sdk::grpc::types::EventTypeFilter>,
+) -> Vec<sol_parser_sdk::DexEvent> {
+    let Some(message) = transaction.as_ref().and_then(|tx| tx.message.as_ref()) else {
+        return vec![];
+    };
+    let keys = message
+        .account_keys
+        .iter()
+        .chain(&meta.loaded_writable_addresses)
+        .chain(&meta.loaded_readonly_addresses)
+        .map(|key| Pubkey::from(<[u8; 32]>::try_from(key.as_slice()).unwrap()))
+        .collect();
+    let tx = VersionedTransaction {
+        signatures: vec![Signature::from(signature)],
+        message: VersionedMessage::V0(v0::Message {
+            header: MessageHeader::default(),
+            address_table_lookups: vec![],
+            account_keys: keys,
+            recent_blockhash: Hash::from(
+                <[u8; 32]>::try_from(message.recent_blockhash.as_slice()).unwrap_or_default(),
+            ),
+            instructions: message
+                .instructions
+                .iter()
+                .map(|ix| CompiledInstruction {
+                    program_id_index: u8::try_from(ix.program_id_index).unwrap(),
+                    accounts: ix.accounts.clone(),
+                    data: ix.data.clone(),
+                })
+                .collect(),
+        }),
+    };
+    let mut events = vec![];
+    sol_parser_sdk::shredstream::parse_transaction_dex_events_with_filter(
+        &tx,
+        Signature::from(signature),
+        slot,
+        tx_index,
+        recv_us,
+        filter,
+        &mut events,
+    );
+    events
+}
+
 fn generated_grpc(tx: &VersionedTransaction) -> Option<Transaction> {
     Some(Transaction {
         message: Some(Message {
@@ -1708,7 +1779,7 @@ fn check_all_filters(
             } else {
                 sol_shred_sdk::EventTypeFilter::include_only(vec![*shred_type])
             };
-            let expected = sol_parser_sdk::grpc::instruction_parser::parse_instructions_enhanced(
+            let expected = parse_outer_reference(
                 &TransactionStatusMeta::default(),
                 &grpc,
                 Default::default(),
@@ -1751,7 +1822,7 @@ fn check_all_filters(
 
 fn check_generated(tx: &VersionedTransaction, label: &str, differences: &mut Vec<String>) {
     let grpc = generated_grpc(tx);
-    let expected = sol_parser_sdk::grpc::instruction_parser::parse_instructions_enhanced(
+    let expected = parse_outer_reference(
         &TransactionStatusMeta::default(),
         &grpc,
         Default::default(),

@@ -8,7 +8,7 @@ pub const PROGRAM_DATA: &str = "Program data: ";
 
 #[derive(Debug)]
 pub enum PumpfunEvent {
-    RawInstruction(Box<crate::core::events::RawInstructionEvent>),
+    PumpFunTrade(Box<crate::core::events::PumpFunTradeEvent>),
     NewToken(CreateTokenInfo),
     // NewDevTrade(TradeInfo),
     NewBonkToken {

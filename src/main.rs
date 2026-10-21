@@ -1,33 +1,27 @@
-use sol_shred_sdk::{PumpfunEvent, ShredStreamGrpc};
-use serde_json::json; // 添加这个导入
-use tonic::{Response, Streaming};
-use futures::channel::mpsc::unbounded;  // 确保这个导入正确
-use std::time::Instant;
-use sol_shred_sdk::grpc::{ws_server, WS_SENDER}; // 添加这个导入
 use chrono::{DateTime, Utc}; // 添加chrono导入
-use futures::SinkExt;  // 添加这个
-use std::sync::Arc;  // 添加这个
-use std::sync::atomic::{AtomicUsize, Ordering};  // 添加这个
-use sol_shred_sdk::common::logs_filters::LogFilter;
+use futures::channel::mpsc::unbounded; // 确保这个导入正确
+use futures::SinkExt; // 添加这个
+use serde_json::json; // 添加这个导入
 use sol_shred_sdk::common::logs_data::{
-    DexInstruction, 
-    CreateTokenInfo, 
-    TradeInfo, 
-    BonkCreateTokenInfo, 
-    TradeRequest
+    BonkCreateTokenInfo, CreateTokenInfo, DexInstruction, TradeInfo, TradeRequest,
 };
+use sol_shred_sdk::common::logs_filters::LogFilter;
+use sol_shred_sdk::grpc::{ws_server, WS_SENDER}; // 添加这个导入
+use sol_shred_sdk::{PumpfunEvent, ShredStreamGrpc};
+use std::sync::atomic::{AtomicUsize, Ordering}; // 添加这个
+use std::sync::Arc; // 添加这个
+use std::time::Instant;
+use tonic::{Response, Streaming};
 
 use sol_shred_sdk::shredstream::{
     shreder_service_client::ShrederServiceClient, SubscribeRequestFilterTransactions,
     SubscribeTransactionsRequest, SubscribeTransactionsResponse,
 };
 
-
-
 use lru::LruCache;
+use once_cell::sync::Lazy;
 use std::num::NonZeroUsize;
 use std::sync::Mutex;
-use once_cell::sync::Lazy;
 mod connector;
 use clap::Parser;
 use env_logger::Env;
@@ -42,35 +36,32 @@ use connector::config::ClientConfig;
 static ENTRIES_COUNT: AtomicUsize = AtomicUsize::new(0);
 static TRANSACTIONS_COUNT: AtomicUsize = AtomicUsize::new(0);
 // 只保留最近10000个tx的签名
-static PROCESSED_TXS: Lazy<Mutex<LruCache<String, ()>>> = Lazy::new(|| {
-    Mutex::new(LruCache::new(NonZeroUsize::new(10_000).unwrap()))
-});
+static PROCESSED_TXS: Lazy<Mutex<LruCache<String, ()>>> =
+    Lazy::new(|| Mutex::new(LruCache::new(NonZeroUsize::new(10_000).unwrap())));
 use lazy_static::lazy_static; // 添加这一行
-use tokio::sync::broadcast; // 添加这一行
 use std::fs::OpenOptions;
 use std::io::Write;
+use tokio::sync::broadcast; // 添加这一行
 use tokio::sync::watch;
-
 
 fn write_mint_to_file(mint: &str) -> std::io::Result<()> {
     let timestamp: DateTime<Utc> = Utc::now();
     let line = format!("{}: {}\n", timestamp.format("%H:%M:%S%.3f"), mint);
-    
+
     let mut file = OpenOptions::new()
         .create(true)
         .append(true)
         .open("mint_shred.txt")?;
-    
+
     file.write_all(line.as_bytes())?;
     Ok(())
 }
-
 
 #[tokio::main]
 
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // let grpc = ShredStreamGrpc::new(
-    //     "http://127.0.0.1:9999".to_string(), 
+    //     "http://127.0.0.1:9999".to_string(),
     // ).await.unwrap();
     // let grpc2 = ShredStreamGrpc::new("http://127.0.0.1:1999".to_string()).await?;
     tokio::spawn(async {
@@ -100,14 +91,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "fee": token_info.fee,
                 });
                 write_mint_to_file(&token_info.mint.to_string()).unwrap();
- 
+
                 let _ = WS_SENDER.send(tx_data.to_string());
                 println!("tx_data: {:?}", tx_data);
                 if token_info.user.to_string() != token_info.creator.to_string() {
-                   println!("mint: {} creator: {} user: {} 不同", token_info.mint.to_string(), token_info.creator.to_string(), token_info.user.to_string());
+                    println!(
+                        "mint: {} creator: {} user: {} 不同",
+                        token_info.mint.to_string(),
+                        token_info.creator.to_string(),
+                        token_info.user.to_string()
+                    );
                 }
-            },
-            PumpfunEvent::NewBonkToken{token, trade} => {
+            }
+            PumpfunEvent::NewBonkToken { token, trade } => {
                 // println!("Received new bonk token event: {:?}", token);
                 // println!("Received new bonk trade event: {:?}", trade);
 
@@ -132,20 +128,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "fee": token.fee,
                     "type": 2,
                 });
- 
+
                 let _ = WS_SENDER.send(tx_data.to_string());
                 let timestamp: DateTime<Utc> = Utc::now();
-                println!("[{}] Received new bonk token tx_data: {:?}", timestamp.format("%Y-%m-%d %H:%M:%S%.3f"), tx_data);
+                println!(
+                    "[{}] Received new bonk token tx_data: {:?}",
+                    timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
+                    tx_data
+                );
                 if token.payer != token.creator {
-                    println!("mint: {} creator: {} payer: {} 不同", token.base_mint, token.creator, token.payer);
+                    println!(
+                        "mint: {} creator: {} payer: {} 不同",
+                        token.base_mint, token.creator, token.payer
+                    );
                 }
-            },
-            PumpfunEvent::RawInstruction(raw) => {
-                println!("Raw instruction: {:?}", raw);
-            },
+            }
+            PumpfunEvent::PumpFunTrade(trade) => {
+                println!(
+                    "Pump.fun candidate ({:?}): {:?}",
+                    trade.parse_status, trade.third_program
+                );
+            }
             PumpfunEvent::NewUserTrade(trade_info) => {
                 // println!("Received new trade event: {:?}", trade_info);
-            },
+            }
             PumpfunEvent::NewToken2 { token, trade } => {
                 // println!("Received new token2 event: {:?}", token);
                 // println!("Received new trade event: {:?}", trade);
@@ -166,17 +172,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "fee": token.fee,
                     "type": 0,
                 });
- 
+
                 let _ = WS_SENDER.send(tx_data.to_string());
                 let timestamp: DateTime<Utc> = Utc::now();
-                println!("[{}] Received new token2 2fen tx_data: {:?}", timestamp.format("%Y-%m-%d %H:%M:%S%.3f"), tx_data);
+                println!(
+                    "[{}] Received new token2 2fen tx_data: {:?}",
+                    timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
+                    tx_data
+                );
                 if token.user.to_string() != token.creator.to_string() {
-                    println!("mint: {} creator: {} user: {} 不同", token.mint.to_string(), token.creator.to_string(), token.user.to_string());
+                    println!(
+                        "mint: {} creator: {} user: {} 不同",
+                        token.mint.to_string(),
+                        token.creator.to_string(),
+                        token.user.to_string()
+                    );
                 }
-            },
+            }
             PumpfunEvent::NewBotTrade(trade_info) => {
                 println!("Received new bot trade event: {:?}", trade_info);
-            },
+            }
             PumpfunEvent::Error(err) => {
                 println!("Received error: {}", err);
             }
@@ -213,12 +228,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     //     }
     // });
 
-
-
-
-    
     // let shared_stats_clone = Arc::clone(&*SHARED_TX_STATS);
-    
+
     let entrypoint = "http://fra1.shreder.xyz:9991/";
     println!("正在连接到: {}", entrypoint);
 
@@ -247,24 +258,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = subscribe_tx.send(request).await;
     println!("订阅请求已发送，等待数据...");
 
-    
-    
     let mut message_count = 0;
     while let Some(message) = stream.message().await.unwrap() {
         message_count += 1;
         // println!("收到消息 #{}", message_count);
-        
+
         let mut token_info: Option<CreateTokenInfo> = None;
         let mut dev_trade_info: Option<TradeInfo> = None;
         let mut bonk_token_info: Option<BonkCreateTokenInfo> = None;
         let mut bonk_trade_info: Option<TradeRequest> = None;
         let slot = 0; // 或者从其他地方获取
-        
+
         if let Some(proto_tx) = &message.transaction {
             // println!("消息包含交易数据");
             let boxed_callback = Box::new(callback);
             if let Some(tx) = &proto_tx.transaction {
-                ShredStreamGrpc::process_pumpfun_transaction_shreder(&message, &*boxed_callback).await.unwrap();
+                ShredStreamGrpc::process_pumpfun_transaction_shreder(&message, &*boxed_callback)
+                    .await
+                    .unwrap();
 
                 // let tx_signature = bs58::encode(&tx.signatures[0]).into_string();
                 // // println!("处理交易签名: {}", tx_signature);
@@ -275,12 +286,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 //         // 已经处理过，直接跳过
                 //         continue;
                 //     }
-                // } 
+                // }
                 // let instructions = LogFilter::parse_compiled_instruction_shreder(&message).unwrap();
                 // for instruction in instructions {
                 //     match instruction {
                 //         DexInstruction::CreateToken(mut token) => {
-                            
+
                 //             let (limit, price, fee_merchant, fee) = LogFilter::parse_tip_info(&versioned_tx);
                 //             token.slot = slot;
                 //             token.unit_limit = limit.unwrap_or(0);
@@ -288,9 +299,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 //             token.fee_merchant = fee_merchant.unwrap_or_default();
                 //             token.fee = fee.unwrap_or(0);
                 //             token_info = Some(token);
-                //         } 
+                //         }
                 //         DexInstruction::BonkCreateToken(mut token) => {
-                            
+
                 //             // let (limit, price, fee_merchant, fee) = LogFilter::parse_tip_info(&versioned_tx);
                 //             // token.unit_limit = limit.unwrap_or(0);
                 //             // token.unit_price = price.unwrap_or(0);
@@ -305,7 +316,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 //             // trade_info.slot = slot;
                 //             if token_info.is_some() {
                 //                 dev_trade_info = Some(trade_info);
-                //             } 
+                //             }
                 //         }
                 //         DexInstruction::BotTrade(mut trade_info) => {
                 //             // trade_info.slot = slot;
@@ -314,13 +325,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 //         _ => {}
                 //     }
                 // }
-                
+
                 // // 用if-else替代match
                 // match (&token_info, &dev_trade_info, &bonk_token_info, &bonk_trade_info) {
                 //     (Some(token), Some(trade), None, None) => {
-                //         let combined_event = PumpfunEvent::NewToken2 { 
-                //             token: token.clone(), 
-                //             trade: trade.clone() 
+                //         let combined_event = PumpfunEvent::NewToken2 {
+                //             token: token.clone(),
+                //             trade: trade.clone()
                 //         };
                 //         callback(combined_event);
                 //     }
@@ -335,12 +346,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 //     }
                 //     _ => {}
                 // }
-                
+
                 // //打印交易的基本信息
                 // println!("=== 交易信息 ===");
                 // println!("交易签名: {}", tx_signature);
                 // println!("签名数量: {}", tx.signatures.len());
-                
+
                 // // 使用 if let 来处理 Option<Message>
                 // if let Some(message) = &tx.message {
                 //     // 打印消息头信息
@@ -350,7 +361,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 //         println!("只读签名账户数量: {}", header.num_readonly_signed_accounts);
                 //         println!("只读非签名账户数量: {}", header.num_readonly_unsigned_accounts);
                 //     }
-                    
+
                 //     // 打印账户公钥
                 //     println!("=== 账户公钥 ===");
                 //     println!("账户数量: {}", message.account_keys.len());
@@ -358,7 +369,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 //         let pubkey = bs58::encode(key).into_string();
                 //         println!("账户 {}: {}", i, pubkey);
                 //     }
-                    
+
                 //     // 打印指令信息
                 //     println!("=== 指令信息 ===");
                 //     println!("指令数量: {}", message.instructions.len());
@@ -367,7 +378,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 //         println!("  程序ID索引: {}", instruction.program_id_index);
                 //         println!("  账户索引数量: {}", instruction.accounts.len());
                 //         println!("  数据长度: {} 字节", instruction.data.len());
-                        
+
                 //         // 打印指令数据（前16字节的十六进制表示）
                 //         if !instruction.data.is_empty() {
                 //             let hex_data: String = instruction.data.iter()
@@ -378,20 +389,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 //             println!("  数据 (前16字节): {}", hex_data);
                 //         }
                 //     }
-                    
+
                 //     // 打印其他信息
                 //     println!("=== 其他信息 ===");
                 //     println!("版本化: {}", message.versioned);
                 //     println!("地址表查找数量: {}", message.address_table_lookups.len());
-                    
+
                 //     if !message.recent_blockhash.is_empty() {
                 //         let blockhash = bs58::encode(&message.recent_blockhash).into_string();
                 //         println!("最近区块哈希: {}", blockhash);
                 //     } else {
                 //         println!("最近区块哈希: 空");
                 //     }
-                
-                
+
                 // println!("=== 交易信息结束 ===\n");
             } else {
                 println!("proto_tx.transaction 为空");
@@ -403,12 +413,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // println!("流结束，总共收到 {} 条消息", message_count);
 
-    
     // grpc.shredstream_subscribe(callback, None).await.unwrap();
     Ok(())
-  
 
     // 主线程阻塞在第二个订阅
     // grpc2.shredstream_subscribe(callback, None).await?;
-
 }

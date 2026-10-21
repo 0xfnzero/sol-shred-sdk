@@ -162,8 +162,9 @@ pub fn parse_instruction(
             false,
         );
     }
-    if outer_disc == [7, 5, 29, 196, 245, 23, 101, 80] {
-        if accounts.len() != 17
+    if outer_disc == discriminators::BUY_V3 {
+        // Anchor permits remaining accounts after the 17 IDL accounts.
+        if accounts.len() < 17
             || data.len() < 16
             || data.len() > 17
             || (data.len() == 17 && data[16] > 1)
@@ -200,8 +201,8 @@ pub fn parse_instruction(
             false,
         );
     }
-    if outer_disc == [225, 247, 80, 30, 213, 179, 132, 136] {
-        if accounts.len() != 17
+    if outer_disc == discriminators::BUY_EXACT_QUOTE_IN_V3 {
+        if accounts.len() < 17
             || data.len() < 16
             || data.len() > 17
             || (data.len() == 17 && data[16] > 1)
@@ -238,8 +239,8 @@ pub fn parse_instruction(
             true,
         );
     }
-    if outer_disc == [28, 146, 222, 119, 38, 196, 105, 213] {
-        if accounts.len() != 17 || data.len() < 16 || data.len() > 17 || data.len() != 16 {
+    if outer_disc == discriminators::SELL_V3 {
+        if accounts.len() < 17 || data.len() != 16 {
             return None;
         }
         let mut mapped = [Pubkey::default(); 27];
@@ -1368,8 +1369,4 @@ mod tests {
             other => panic!("expected PumpFunBuy, got {other:?}"),
         }
     }
-
-
-
-
 }

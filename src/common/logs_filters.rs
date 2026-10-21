@@ -72,7 +72,7 @@ impl LogFilter {
                 versioned_tx.signatures.first().copied().unwrap_or_default(),
                 0,
             ) {
-                instructions.push(DexInstruction::RawInstruction(Box::new(raw)));
+                instructions.push(DexInstruction::PumpFunTrade(Box::new(raw)));
             }
         }
         if let Some(index) = pump_index {
@@ -201,40 +201,36 @@ impl LogFilter {
         instruction_index: usize,
         signature: solana_sdk::signature::Signature,
         slot: u64,
-    ) -> Option<crate::core::events::RawInstructionEvent> {
+    ) -> Option<crate::core::events::PumpFunTradeEvent> {
         let program_id = *keys.get(program_index)?;
-        if !crate::shredstream::pump_ix::is_unknown_program_for_raw(&program_id) {
+        if !crate::shredstream::pump_ix::is_third_party_program(&program_id) {
             return None;
         }
-        let dexes = crate::core::events::raw_instruction_dexes(
-            program_id,
-            &accounts
-                .iter()
-                .map(|i| keys.get(*i as usize).copied())
-                .collect::<Vec<_>>(),
-        );
         // This legacy API is specifically a PumpFun subscription.
-        if !dexes
+        if !accounts
             .iter()
-            .any(|dex| dex.dex_type == crate::core::events::RawInstructionDexType::PumpFun)
+            .any(|i| keys.get(*i as usize) == Some(&PUMPFUN_PROGRAM_ID))
         {
             return None;
         }
-        Some(crate::core::events::RawInstructionEvent {
-            dexes,
+        Some(crate::core::events::PumpFunTradeEvent {
             metadata: crate::core::EventMetadata {
                 signature,
                 slot,
                 ..Default::default()
             },
-            program_id,
-            instruction_index,
-            accounts: accounts
-                .iter()
-                .map(|i| keys.get(usize::from(*i)).copied())
-                .collect(),
-            account_indices: accounts.to_vec(),
-            instruction_data: data.to_vec(),
+            third_program: Some(crate::core::events::RawInstructionPayload {
+                program_id,
+                instruction_index,
+                accounts: accounts
+                    .iter()
+                    .map(|i| keys.get(usize::from(*i)).copied())
+                    .collect(),
+                account_indices: accounts.to_vec(),
+                instruction_data: data.to_vec(),
+            }),
+            parse_status: crate::core::events::TradeParseStatus::Unresolved,
+            ..Default::default()
         })
     }
 
@@ -303,7 +299,7 @@ impl LogFilter {
                 signature,
                 transaction_update.slot,
             ) {
-                instructions.push(DexInstruction::RawInstruction(Box::new(raw)));
+                instructions.push(DexInstruction::PumpFunTrade(Box::new(raw)));
             }
         }
         if let Some(pump_index) = accounts_pubkeys

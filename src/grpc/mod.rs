@@ -167,7 +167,7 @@ impl ShredStreamGrpc {
 
         for instruction in instructions {
             match instruction {
-                DexInstruction::RawInstruction(raw) => callback(PumpfunEvent::RawInstruction(raw)),
+                DexInstruction::PumpFunTrade(trade) => callback(PumpfunEvent::PumpFunTrade(trade)),
                 DexInstruction::CreateToken(mut token) => {
                     let (unit_limit, unit_price, fee_merchant, fee) =
                         tip_info.get_or_insert_with(|| LogFilter::parse_tip_info_shreder(tx_info));

@@ -82,9 +82,9 @@ impl PumpfunEventParser {
 
         for instruction in instructions {
             match instruction {
-                DexInstruction::RawInstruction(mut raw) => {
+                DexInstruction::PumpFunTrade(mut raw) => {
                     raw.metadata.slot = slot;
-                    callback(PumpfunEvent::RawInstruction(raw));
+                    callback(PumpfunEvent::PumpFunTrade(raw));
                     emitted += 1;
                 }
                 DexInstruction::CreateToken(mut token) => {
@@ -174,7 +174,7 @@ impl TransactionEventParser for PumpfunEventParser {
         F: FnMut(Self::Event),
     {
         self.process_transaction(transaction, slot, |mut event| {
-            if let PumpfunEvent::RawInstruction(raw) = &mut event {
+            if let PumpfunEvent::PumpFunTrade(raw) = &mut event {
                 raw.metadata.tx_index = tx_index;
                 raw.metadata.grpc_recv_us = recv_us;
                 raw.metadata.recent_blockhash =

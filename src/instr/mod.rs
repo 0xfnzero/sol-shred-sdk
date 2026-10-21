@@ -362,12 +362,25 @@ pub fn parse_instruction_unified(
 
     // Official LP execution data is distinct from deposit/withdraw limits.
     if *program_id == RAYDIUM_CPMM_PROGRAM_ID
-        && instruction_data.get(..16) == Some(&all_inner::raydium_cpmm::discriminators::LP_CHANGE_EVENT) {
-        let metadata = crate::logs::utils::create_metadata_simple(signature, slot, tx_index,
-            block_time_us, Pubkey::default(), grpc_recv_us);
-        return filter_parsed_event(all_inner::raydium_cpmm::parse(
-            &all_inner::raydium_cpmm::discriminators::LP_CHANGE_EVENT, &instruction_data[16..], metadata,
-        ), event_type_filter);
+        && instruction_data.get(..16)
+            == Some(&all_inner::raydium_cpmm::discriminators::LP_CHANGE_EVENT)
+    {
+        let metadata = crate::logs::utils::create_metadata_simple(
+            signature,
+            slot,
+            tx_index,
+            block_time_us,
+            Pubkey::default(),
+            grpc_recv_us,
+        );
+        return filter_parsed_event(
+            all_inner::raydium_cpmm::parse(
+                &all_inner::raydium_cpmm::discriminators::LP_CHANGE_EVENT,
+                &instruction_data[16..],
+                metadata,
+            ),
+            event_type_filter,
+        );
     }
 
     // 根据程序 ID 路由到相应的解析器，按使用频率排序
@@ -711,6 +724,3 @@ mod tests {
         ));
     }
 }
-
-/// Offline Pump route-intent decoding for supported outer instruction layouts.
-pub mod pump_routes;

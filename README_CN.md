@@ -1,77 +1,97 @@
-当前版本：**5.0.0**。本轮同步 SDK、原生语言测试、示例及文档。升级说明见 [RELEASE_NOTES.md](RELEASE_NOTES.md)。
-
 <div align="center">
-
-[第三方 Pump.fun 包装指令：离线规则、热路径边界与真实交易回放](docs/wrapped-pumpfun.md)
-
-## v4.0.9 — Shred 元数据透传与顺序范围
-
-保留并验证 `tx_index`、接收时间从解析入口传到原始指令回调。明确 Entries 消息内序号与 Yellowstone 节点 index 的区别：本地序号不是全 slot 索引；跨消息去重使用交易签名。此版本完善文档和回归保护，不改变现有字段或编号规则。
-
-
-## v4.0.9 — RawInstruction 协议过滤与 DEX 枚举
-
-修复原始指令绕过 DEX 订阅范围的问题。按单条指令引用的官方程序识别 DEX，使用 `RawInstructionDexType` 枚举；JSON 字符串保持不变。未知 router 不推断池子地址、买卖方向或方法版本。
-
-
-## v4.0.9 — Shred 原始指令透传
-
-兼容入口 `PumpfunEventParser` 和 `ShredStreamGrpc` 也透传 `PumpfunEvent::RawInstruction`。修复普通交易被丢弃、无关交易被合并到创建事件的问题；旧日志解析器按调用栈保留嵌套 Pump 交易腿，并丢弃失败父调用的事件。ShredStream gRPC 传输的是执行前交易，不具备 Yellowstone 执行元数据。
-
-运行 `cargo run --example pump_raw_replay` 回放 2026-10-19 新抓取的 Delta 交易（slot 458542546）。只输出 Shred 可见的原始指令账户和 data，不猜内部买卖。共享事件解码器已兼容官方 Anchor CPI 前缀，但 Shred 本身不包含执行元数据。
-
-默认 Shred 入口将未适配的第三方程序（包括 Rapid/Delta）作为 `RawInstruction` 返回，不再推断买卖方向、金额或内部 buy 版本。System、Token、ATA、ComputeBudget 等基础程序默认不透传；已支持的官方 DEX 指令继续正常解析，官方 Pump/PumpSwap 多跳仍返回 `PumpRouteIntent`。
-
-事件包含 `program_id`、`instruction_index`、`accounts`、`account_indices`、`instruction_data` 和交易 metadata。账户保留原顺序与重复项；未解析 ALT 地址为 null/None，原始索引仍保留。使用缓存 loaded-addresses/resolver 补齐，热路径不请求 RPC。data 是完整原始字节，不要求已知布局。
-
-运行 `cargo run --example raw_instruction_filter` 对比同一组已签名交易的 PumpFun、Raydium CPMM 与全量原始指令订阅；输出包含 `dexes`。
-
-原始事件保留调用方传入的 `metadata.tx_index` 和 `metadata.grpc_recv_us`（streamer 对应 `metadata.recv_us`）。默认 Entries 客户端的交易序号仅在单条接收消息内递增，下一条消息从 0 重新计数，不等于已确认的整个 slot 交易序号。`instruction_index` 表示交易内外层指令顺序；接收时间是本地微秒时间戳，不保证链上执行顺序。独立回放 API 可能默认填 0，调用时应传入上游已有的序号与接收时间。
-
-无过滤器时返回未知第三方指令。宽泛交易/Swap 订阅（如 `PumpFunTrade`、`RaydiumCpmmSwap`）也返回关联该 DEX 的原始指令；买/卖方向订阅不推测方向。显式 `RawInstruction` 仅在未限制协议时返回全部外层指令，streamer 的协议限制始终生效；显式排除 `RawInstruction` 优先。`dex_type` 使用公开枚举 `RawInstructionDexType`（Go 为命名字符串类型与常量）；JSON 仍为 `"pumpfun"`、`"raydium_cpmm"` 等原有字符串。`dexes` 数组包含各关联 DEX 的 `{ dex_type, program_id, pool }`，只识别本条指令直接调用或账户中引用的 DEX 程序，不借用同笔其他指令的账户；多 DEX 包装保留所有关联。未知或未解析 ALT 中的程序不能匹配 DEX 订阅。`pool` 当前为 null：未知包装布局无法确定池子账户。program 引用不证明执行了 CPI，原始回调不是成交。
-
-已有 wrapper 适配函数仅作为显式调用的兼容接口保留，不参与默认 Shred 解码。以下已发布版本的历史说明描述旧行为。
-
-    <h1>⚡ Sol Shred SDK</h1>
-    <h3><em>低延迟 Solana 原始 Shred 解码与多 DEX 事件解析</em></h3>
+    <h1>Sol Shred SDK</h1>
+    <p>Solana 原始 Shred 解码与 DEX 事件解析</p>
+    <a href="https://crates.io/crates/sol-shred-sdk"><img src="https://img.shields.io/crates/v/sol-shred-sdk.svg" alt="sol-shred-sdk"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
 </div>
 
 <p align="center">
-    <strong>高性能 Rust SDK，将 Solana UDP Shred 或 Jito 风格 ShredStream Entry 转换为强类型 DEX 事件，适用于交易机器人、索引服务和实时分析。</strong>
+    <a href="README.md">English</a> · <a href="README_CN.md">中文</a> ·
+    <a href="examples/README.md">示例</a> ·
+    <a href="docs/wrapped-pumpfun.md">文档</a> ·
+    <a href="RELEASE_NOTES.md">发布与迁移</a> ·
+    <a href="#related-sdks">相关 SDK</a>
 </p>
 
-<p align="center">
-    <a href="https://crates.io/crates/sol-shred-sdk"><img src="https://img.shields.io/crates/v/sol-shred-sdk.svg" alt="Crates.io"></a>
-    <a href="https://docs.rs/sol-shred-sdk"><img src="https://docs.rs/sol-shred-sdk/badge.svg" alt="Documentation"></a>
-    <a href="https://github.com/0xfnzero/sol-shred-sdk/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
-    <a href="https://github.com/0xfnzero/sol-shred-sdk"><img src="https://img.shields.io/github/stars/0xfnzero/sol-shred-sdk?style=social" alt="GitHub stars"></a>
-    <a href="https://github.com/0xfnzero/sol-shred-sdk/network"><img src="https://img.shields.io/github/forks/0xfnzero/sol-shred-sdk?style=social" alt="GitHub forks"></a>
-</p>
+将 UDP Shred 或 ShredStream Entries 解码为交易和 DEX 指令事件，适用于交易监控、索引和低延迟订阅。
 
-<p align="center">
-    <img src="https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white" alt="Rust">
-    <img src="https://img.shields.io/badge/Solana-9945FF?style=for-the-badge&logo=solana&logoColor=white" alt="Solana">
-    <img src="https://img.shields.io/badge/ShredStream-FF6B6B?style=for-the-badge&logo=lightning&logoColor=white" alt="ShredStream">
-    <img src="https://img.shields.io/badge/DEX-4B8BBE?style=for-the-badge&logo=bitcoin&logoColor=white" alt="DEX Events">
-</p>
+当前版本：**6.0.0**。升级前请阅读 [迁移说明](RELEASE_NOTES.md)；历史变更见 [版本记录](CHANGELOG_CN.md)。
 
-<p align="center">
-    <a href="README_CN.md">中文</a> |
-    <a href="README.md">English</a> |
-    <a href="https://fnzero.dev/">官网</a> |
-    <a href="https://t.me/fnzero_group">Telegram</a> |
-    <a href="https://discord.gg/vuazbGkqQE">Discord</a>
-</p>
+## 目录
 
-`sol-shred-sdk` 是用于 Solana 原始 Shred 解码、ShredStream 接入和多 DEX 交易事件解析的低延迟 Rust SDK。
+- [相关 SDK](#related-sdks)
+- [安装](#安装)
+- [使用场景](#使用场景)
+- [SDK 能力](#sdk-能力)
+- [交易来源与解析边界](#交易来源与解析边界)
+- [真实 RPC 交易解析示例](#真实-rpc-交易解析示例)
+- [文档导航](#文档导航)
+- [解码模式](#解码模式)
+- [Raw UDP 事件订阅](#raw-udp-事件订阅)
+- [Queue 订阅](#queue-订阅)
 
-默认的最低延迟路径：
+<a id="related-sdks"></a>
 
-```text
-UDP packet -> Solana/Agave Shred -> FEC recovery -> deshred -> Entry -> VersionedTransaction -> event parser
+## 相关 SDK
+
+各仓库版本独立，依赖兼容要求以对应 SDK 的安装说明为准。
+
+| 语言 | 仓库 | 用途 | 版本 |
+|----------|------------|-------------|---------|
+| Rust | [sol-parser-sdk](https://github.com/0xfnzero/sol-parser-sdk) | DEX 交易与账户事件解析 | `v0.9.0` |
+| Node.js | [sol-parser-sdk-nodejs](https://github.com/0xfnzero/sol-parser-sdk-nodejs) | DEX 交易与账户事件解析 | `v0.9.0` |
+| Python | [sol-parser-sdk-python](https://github.com/0xfnzero/sol-parser-sdk-python) | DEX 交易与账户事件解析 | `v0.9.0` |
+| Go | [sol-parser-sdk-golang](https://github.com/0xfnzero/sol-parser-sdk-golang) | DEX 交易与账户事件解析 | `v0.9.0` |
+| Rust | [sol-trade-sdk](https://github.com/0xfnzero/sol-trade-sdk) | 交易构建、签名与多通道提交 | `v9.0.0` |
+| Node.js | [sol-trade-sdk-nodejs](https://github.com/0xfnzero/sol-trade-sdk-nodejs) | 交易构建、签名与多通道提交 | `v9.0.0` |
+| Python | [sol-trade-sdk-python](https://github.com/0xfnzero/sol-trade-sdk-python) | 交易构建、签名与多通道提交 | `v9.0.0` |
+| Go | [sol-trade-sdk-golang](https://github.com/0xfnzero/sol-trade-sdk-golang) | 交易构建、签名与多通道提交 | `v9.0.0` |
+| Rust | [sol-shred-sdk](https://github.com/0xfnzero/sol-shred-sdk) | 原始 Shred 解码与 ShredStream 指令事件 | `v6.0.0` |
+| Rust | [solana-streamer](https://github.com/0xfnzero/solana-streamer) | gRPC / ShredStream 订阅与事件流封装 | `v5.0.0` |
+| Rust | [sol-trade-router-sdk](https://github.com/0xfnzero/sol-trade-router-sdk) | 链上多跳 Router 与客户端 SDK | `v0.3.0` |
+
+<a id="安装"></a>
+
+## 安装
+
+```toml
+# 添加到您的 Cargo.toml
+[dependencies]
+sol-shred-sdk = "6.0.0"
 ```
 
-通过 `ShredDecodeMode` 选择数据源和解码模式。推荐使用原生 raw UDP shred 路径；在 Jito 服务可用期间，仍保留 Jito 风格 ShredStream gRPC Entry 作为兼容数据源。
+PumpFun create/create_v2 账户布局与 RPC 回归验证：[PUMPFUN_CREATE_LAYOUT.md](docs/PUMPFUN_CREATE_LAYOUT.md)。
+
+### 从源码使用
+
+将此项目克隆到您的项目目录：
+
+```bash
+cd your_project_root_directory
+git clone https://github.com/0xfnzero/sol-shred-sdk
+```
+
+在您的 `Cargo.toml` 中添加依赖：
+
+```toml
+# 添加到您的 Cargo.toml
+sol-shred-sdk = { path = "./sol-shred-sdk", version = "6.0.0" }
+```
+
+<a id="使用场景"></a>
+
+## 使用场景
+
+- Solana 低延迟交易机器人和狙击机器人
+- PumpFun、PumpSwap、Raydium、Orca、Meteora 实时事件流
+- 不依赖 Jito ShredStream 的原始 UDP Shred 接入管道
+- 迁移到 raw shred 期间的 Jito ShredStream gRPC 兼容
+- 多 DEX 索引、分析和告警系统
+- 复用统一 Shred/Entry 接入层的上层解析 SDK
+
+Raw shred 订阅直接从 `Entry` 交易解析交易中可见的指令数据。SDK 为兼容性保留了仅日志和账户更新事件解析器，但 raw shred 本身不携带执行日志或账户更新 payload。
+
+<a id="sdk-能力"></a>
 
 ## SDK 能力
 
@@ -92,44 +112,15 @@ UDP packet -> Solana/Agave Shred -> FEC recovery -> deshred -> Entry -> Versione
 - Meteora Pools、DAMM V2、DBC、DLMM
 - Token account、Nonce account、部分 DEX account state 事件和 block metadata 类型
 
-## 使用场景
+<a id="交易来源与解析边界"></a>
 
-- Solana 低延迟交易机器人和狙击机器人
-- PumpFun、PumpSwap、Raydium、Orca、Meteora 实时事件流
-- 不依赖 Jito ShredStream 的原始 UDP Shred 接入管道
-- 迁移到 raw shred 期间的 Jito ShredStream gRPC 兼容
-- 多 DEX 索引、分析和告警系统
-- 复用统一 Shred/Entry 接入层的上层解析 SDK
+## 交易来源与解析边界
 
-Raw shred 订阅直接从 `Entry` 交易解析交易中可见的指令数据。SDK 为兼容性保留了仅日志和账户更新事件解析器，但 raw shred 本身不携带执行日志或账户更新 payload。
+原始 Shred 与 ShredStream gRPC 携带执行前交易，不包含 Yellowstone 执行元数据。这条路径只能看到外层指令与本地已解析的账户。未知第三方指令在自身账户中引用 Pump.fun 时，可回调 `PumpFunTrade` 候选，携带 `third_program` 原始输入与 `Unresolved` 状态；这不证明交易已执行，也不确定方向或金额。买入／卖出专用过滤器不会把未知方向当作成交。
 
-## 安装
+解析热路径不调用 RPC。按 `parse_status` 判断证据，缺失字段的默认值不代表实际零成交。账户顺序与原始指令数据保留在 `third_program`；交易序号和接收时间仍在事件元数据中，本地 Shred 序号不等于全 slot 执行顺序。详见 [第三方包装交易](docs/wrapped-pumpfun.md)。
 
-### 直接克隆
-
-将此项目克隆到您的项目目录：
-
-```bash
-cd your_project_root_directory
-git clone https://github.com/0xfnzero/sol-shred-sdk
-```
-
-在您的 `Cargo.toml` 中添加依赖：
-
-```toml
-# 添加到您的 Cargo.toml
-sol-shred-sdk = { path = "./sol-shred-sdk", version = "5.0.0" }
-```
-
-### 使用 crates.io
-
-```toml
-# 添加到您的 Cargo.toml
-[dependencies]
-sol-shred-sdk = "5.0.0"
-```
-
-PumpFun create/create_v2 账户布局与 RPC 回归验证：[PUMPFUN_CREATE_LAYOUT.md](docs/PUMPFUN_CREATE_LAYOUT.md)。
+<a id="pumpswap-有效-quote-reserves"></a>
 
 ## PumpSwap 有效 Quote Reserves
 
@@ -154,6 +145,8 @@ assert_eq!(quote_reserve, 500);
 
 原始 shreds 只包含外层交易指令，不包含执行日志、内部 CPI、Pool 状态或 vault 余额。因此外层 Buy/Sell 解析事件的储备及费率默认 `0` 表示未知，不能视为池的真实值。报价需要预先维护一致的 Pool/vault/手续费配置缓存；不要在交易热路径临时查询 RPC。`buy_exact_quote_in` 的 `min_base_amount_out` 是指令参数下限，不是实际成交量。外层买入解析已保留 `track_volume` 和 `ix_name`，并同步当前追加账户位置。
 
+<a id="解码模式"></a>
+
 ## 解码模式
 
 创建客户端时选择数据源和解码器：
@@ -169,6 +162,8 @@ let jito = ShredStreamClient::new_with_decode_mode(
     ShredDecodeMode::jito_grpc("http://127.0.0.1:10000"),
 ).await?;
 ```
+
+<a id="raw-udp-事件订阅"></a>
 
 ## Raw UDP 事件订阅
 
@@ -206,6 +201,8 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
+<a id="queue-订阅"></a>
+
 ## Queue 订阅
 
 适合轮询消费的客户端：
@@ -229,6 +226,8 @@ async fn main() -> anyhow::Result<()> {
 
 旧版 PumpFun/Bonk 客户端仍可使用 `subscribe_pumpfun`、`subscribe_pumpfun_callback` 和通用 `subscribe_with_parser` API。
 
+<a id="低层解码器"></a>
+
 ## 低层解码器
 
 已经自行管理 UDP 接收循环时，可以直接使用低层 API：
@@ -250,9 +249,13 @@ fn handle_packet(decoder: &mut RawShredDecoder, packet: &[u8]) {
 let mut decoder = RawShredDecoder::new(RawShredConfig::default());
 ```
 
+<a id="自定义交易解析器"></a>
+
 ## 自定义交易解析器
 
 `sol-shred-sdk` 负责网络、Shred 重组和交易遍历。上层 crate 可以通过 `TransactionEventParser` 接入事件解析，无需重新实现 ShredStream 接入。
+
+<a id="配置说明"></a>
 
 ## 配置说明
 
@@ -264,6 +267,8 @@ let mut decoder = RawShredDecoder::new(RawShredConfig::default());
 - UDP 接收缓冲通过 `socket2` 请求，操作系统可能限制最终生效值。
 - Merkle FEC 恢复遵循 Agave wire 布局和 Jito 的门槛规则：只有收齐至少 `num_data_shreds` 个不重复 data/coding shard 后才尝试恢复。
 - Raw UDP 解码器没有 leader schedule，因此不执行 leader 签名验证。接收不可信 UDP 时应使用可信本地转发器，或在调用 `RawShredDecoder` 前完成 shred 验签。
+
+<a id="解码基准测试"></a>
 
 ## 解码基准测试
 
@@ -278,6 +283,8 @@ RAW_SHRED_BENCH_ITERS=10000 cargo test --release --lib bench_decode_generated_sh
 ```text
 packets_per_sec=3276089 slots_per_sec=102378 tx_per_sec=3276089
 ```
+
+<a id="指令账户上下文"></a>
 
 ## 指令账户上下文
 
@@ -382,41 +389,35 @@ CreatorFeeShare 账户。`cpmm_creator_fee` 提供 PDA 推导、旧收集调用�
 精确整数分账工具。Swap、quote 和 LP 路径不变。详见
 [迁移指南](docs/cpmm-creator-fee-upgrade.md)。
 
-## 许可证
+<a id="真实-rpc-交易解析示例"></a>
 
-本项目使用 MIT License，详情参见 [LICENSE](LICENSE)。
-
-### 社区
-
-- Telegram: https://t.me/fnzero_group
-- Discord: https://discord.gg/vuazbGkqQE
-
-### 真实 RPC 交易解析示例
+## 真实 RPC 交易解析示例
 
 见 [examples 使用说明](examples/README.md)：实时 RPC 拉取、11 笔主网样本离线回放，以及原始指令和 token 余额校验。
 
 See [real RPC examples and validation limits](examples/PUMPSWAP_RPC.md).
 
-## v4.0.6 — Pump 路由事件完善
+<a id="文档导航"></a>
 
-路由意图新增 `is_buy` 和 `ix_name`，沿用交易事件字段名和官方 IDL 方法名。RapidBuy 为买入意图，方法为 `buy_exact_quote_in_v2`；BuyPumpDelta 仅确定买入方向；多跳方向与未知方法保持为空。币种仍从 `hops[].base_mint` / `quote_mint` 获取。这些信息不代表已成交，过滤器也不会将路由意图转换为交易事件。
+## 文档导航
 
-Streamer 现在通过 `DexEvent::PumpRouteIntentEvent` 转发完整路由字段并支持过滤。旧 JSON 缺少新字段时保持未知；Rust 结构体字面量需补齐新字段，穷举 streamer 事件的代码需处理新变体。
+- [发布与迁移](RELEASE_NOTES.md)
+- [使用指南](docs/wrapped-pumpfun.md)
+- [示例索引](examples/README.md)
 
-## v4.0.5 — Pump routes and offline replay
 
-Adds native Pump route-intent parsing for official multi-hop instructions and the exact RapidBuy/BuyPumpDelta wrapper layouts captured in reported transactions. Adds locally cached ALT resolution and rejects unresolved account identities by default, with explicit best-effort compatibility APIs where supported. Route intents expose instruction constraints and hop identities; confirmed execution amounts require execution metadata.
+<a id="许可证"></a>
 
-Includes the latest complete implementation, signed transaction fixtures, native offline-bank regression examples and reproducible local hot-path benchmarks. Unknown wrapper layouts are not inferred from embedded bytes. Local tests do not measure production network latency.
+## 许可证
 
-## v4.0.4 — Pump depth-2 compatibility
+本项目使用 MIT License，详情参见 [LICENSE](LICENSE)。
 
-Adds signed Pump depth-2 create-event replay coverage, including ALT-loaded accounts and executed logs. Existing event layouts and public parsing interfaces remain unchanged.
+<a id="社区"></a>
 
-Validation includes official Pump SDK 4.1.0 instruction comparisons, signed local LiteSVM simulations and SDK regressions. Local simulation state/config is synthetic; no funded transactions were broadcast and production latency was not measured.
+## 社区
 
-## v4.0.3 — Signed transaction and hot-path hardening
+- Telegram: https://t.me/fnzero_group
+- Discord: https://discord.gg/vuazbGkqQE
 
-Hardens signed shred/FEC replay, rejection recovery, loaded-address and wire boundaries. Aligns DEX instruction/account layouts, compact Pump/PumpSwap events, CPMM creator fees, route attribution and liquidity/reward parsing. Malformed protobuf program keys remain unknown rather than being classified as SystemProgram. Adds signed transaction and offline bank regression fixtures.
 
-Validation includes local CPU benchmarks and offline signed-bank scenarios. Measured hot paths use cached inputs without RPC. Benchmarks do not establish production network or transaction-landing latency. No funded mainnet transactions were broadcast.
+股票池同步：34 种官方股票/ETF、63 个股票池；配置扩展、USDC 起点、缓存选路与使用边界见 [11 SDK 同步说明](docs/STOCK_BRIDGE_SYNC.md)。

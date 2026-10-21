@@ -572,11 +572,13 @@ pub fn validate(j: &Value) -> Result<(usize, TransactionRoute, usize)> {
     }
     // Corpus coverage counts decoded native events, not raw/candidate callbacks.
     // Raw payload fidelity and candidate filtering have dedicated wire tests.
-    let decoded = events.iter().filter(|event| {
-        !matches!(event, sol_shred_sdk::DexEvent::RawInstruction(_))
-            && event.trade_parse_status()
+    let decoded = events
+        .iter()
+        .filter(|event| {
+            event.trade_parse_status()
                 != Some(sol_shred_sdk::core::events::TradeParseStatus::Unresolved)
-    }).count();
+        })
+        .count();
     Ok((decoded, route, checked))
 }
 

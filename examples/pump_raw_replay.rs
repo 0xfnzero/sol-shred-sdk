@@ -1,6 +1,6 @@
 //! Current Delta wrapper: preserve raw accounts/data, never infer the internal sell.
 use base64::{engine::general_purpose::STANDARD, Engine};
-use sol_shred_sdk::{core::events::DexEvent, transaction::VersionedTransaction, Pubkey};
+use sol_shred_sdk::{transaction::VersionedTransaction, Pubkey};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let f: serde_json::Value =
@@ -31,9 +31,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         None,
         &mut events,
     )?;
-    assert!(events
-        .iter()
-        .any(|e| matches!(e, DexEvent::RawInstruction(_))));
+    assert!(events.iter().any(|e| e.trade_parse_status()
+        == Some(sol_shred_sdk::core::events::TradeParseStatus::Unresolved)));
     println!("{}", serde_json::to_string_pretty(&events)?);
     Ok(())
 }

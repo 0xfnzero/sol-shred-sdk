@@ -1,77 +1,83 @@
-Current version: **5.0.0**. SDK, native-language tests, examples and documentation are synchronized in this release. See [RELEASE_NOTES.md](RELEASE_NOTES.md) for migration details.
-
 <div align="center">
-
-[Wrapped Pump.fun: offline rules, hot-path boundaries, and real-transaction replays](docs/wrapped-pumpfun.md)
-
-## v4.0.9 — Shred metadata passthrough and ordering scope
-
-Preserve and verify transaction position and receive time through raw instruction callbacks. Entries indexes are message-local, unlike Yellowstone node indexes; use signatures for cross-message deduplication. This release clarifies API documentation and adds regression protection without changing metadata fields or numbering behavior.
-
-
-## v4.0.9 — DEX-scoped RawInstruction and typed DEX identifiers
-
-Raw instructions now respect DEX subscriptions using programs referenced by each instruction. `RawInstructionDexType` provides typed identifiers with unchanged JSON strings. Unknown router layouts do not establish pool addresses, trade direction, or method versions.
-
-
-## v4.0.9 — raw Shred instructions
-
-The compatibility `PumpfunEventParser` and `ShredStreamGrpc` callbacks now forward `PumpfunEvent::RawInstruction`. Standalone trades are no longer dropped or merged into unrelated creates. The log-only compatibility parser preserves nested Pump legs and discards events from failed parent invocations. ShredStream gRPC transports pre-execution transactions, not Yellowstone execution metadata.
-
-Run `cargo run --example pump_raw_replay` for a freshly captured Delta transaction (2026-10-19, slot 458542546). It emits the visible raw instruction accounts/data without inferring an internal buy/sell. The shared decoder now also accepts current Anchor event CPI prefixes; Shred itself does not contain execution metadata.
-
-Default Shred parsing emits `RawInstruction` for unsupported third-party programs, including Rapid/Delta, without inferring direction, amounts, or internal buy methods. Infrastructure programs (System, Token, ATA, ComputeBudget, etc.) are omitted by default. Supported official DEX parsers are unchanged; official Pump/PumpSwap multi-hop instructions retain `PumpRouteIntent`.
-
-The payload contains `program_id`, `instruction_index`, `accounts`, `account_indices`, `instruction_data`, and transaction metadata. Account order and duplicates are preserved. Unresolved ALT addresses are null/None, with original indices retained; supply cached loaded addresses or a resolver. No hot-path RPC is performed. Data is copied verbatim without requiring a known layout.
-
-Run `cargo run --example raw_instruction_filter` to compare PumpFun-only, Raydium CPMM-only, and all-raw subscriptions against signed offline transactions; the output includes `dexes`.
-
-The raw event retains `metadata.tx_index` and `metadata.grpc_recv_us` from the parser arguments (streamer names the receive field `metadata.recv_us`). The default Entries client index is local to one received Entries message and restarts at zero for the next message; it is not a confirmed slot-wide transaction index. `instruction_index` orders outer instructions within a transaction. Receive time is a local microsecond timestamp, not an execution-order guarantee. Standalone replay APIs may default these values to zero; pass the upstream values when available.
-
-Without a filter, unknown third-party instructions are returned. Broad trade/swap filters (for example `PumpFunTrade` or `RaydiumCpmmSwap`) also return raw instructions associated with that DEX; direction-specific filters do not infer a buy or sell. Explicit `RawInstruction` selects all outer instructions only when no protocol restriction is set; streamer protocol restrictions always apply. Excluding `RawInstruction` wins. `dex_type` uses the public `RawInstructionDexType` enum (typed string constants in Go); JSON values remain unchanged, such as `"pumpfun"` and `"raydium_cpmm"`. `dexes` contains `{ dex_type, program_id, pool }` for each recognized DEX program targeted or referenced by this instruction, not other instructions in the transaction. Multi-DEX wrappers retain every association. Unknown or unresolved ALT references cannot satisfy a DEX subscription. `pool` is currently null: an unknown wrapper layout cannot establish the pool account. A program reference is not proof of an executed CPI. Raw callbacks are not fills.
-
-Wrapper adapter functions remain explicit compatibility helpers only; default Shred parsing does not call them. The released-version history below describes previous behavior.
-
-    <h1>⚡ Sol Shred SDK</h1>
-    <h3><em>Low-latency Solana raw shred decoding and multi-DEX event parsing</em></h3>
+    <h1>Sol Shred SDK</h1>
+    <p>Solana raw shred decoding and DEX event parsing</p>
+    <a href="https://crates.io/crates/sol-shred-sdk"><img src="https://img.shields.io/crates/v/sol-shred-sdk.svg" alt="sol-shred-sdk"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
 </div>
 
 <p align="center">
-    <strong>A high-performance Rust SDK that turns Solana UDP shreds or Jito-style ShredStream entries into typed DEX events for trading bots, indexers, and real-time analytics.</strong>
+    <a href="README.md">English</a> · <a href="README_CN.md">中文</a> ·
+    <a href="examples/README.md">Examples</a> ·
+    <a href="docs/wrapped-pumpfun.md">Documentation</a> ·
+    <a href="RELEASE_NOTES.md">Release and migration</a> ·
+    <a href="#related-sdks">Related SDKs</a>
 </p>
 
-<p align="center">
-    <a href="https://crates.io/crates/sol-shred-sdk"><img src="https://img.shields.io/crates/v/sol-shred-sdk.svg" alt="Crates.io"></a>
-    <a href="https://docs.rs/sol-shred-sdk"><img src="https://docs.rs/sol-shred-sdk/badge.svg" alt="Documentation"></a>
-    <a href="https://github.com/0xfnzero/sol-shred-sdk/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
-    <a href="https://github.com/0xfnzero/sol-shred-sdk"><img src="https://img.shields.io/github/stars/0xfnzero/sol-shred-sdk?style=social" alt="GitHub stars"></a>
-    <a href="https://github.com/0xfnzero/sol-shred-sdk/network"><img src="https://img.shields.io/github/forks/0xfnzero/sol-shred-sdk?style=social" alt="GitHub forks"></a>
-</p>
+Decode UDP shreds or ShredStream entries into transactions and DEX instruction events for monitoring, indexing and low-latency subscriptions.
 
-<p align="center">
-    <img src="https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white" alt="Rust">
-    <img src="https://img.shields.io/badge/Solana-9945FF?style=for-the-badge&logo=solana&logoColor=white" alt="Solana">
-    <img src="https://img.shields.io/badge/ShredStream-FF6B6B?style=for-the-badge&logo=lightning&logoColor=white" alt="ShredStream">
-    <img src="https://img.shields.io/badge/DEX-4B8BBE?style=for-the-badge&logo=bitcoin&logoColor=white" alt="DEX Events">
-</p>
+Current version: **6.0.0**. Read the [migration notes](RELEASE_NOTES.md) before upgrading; see the [changelog](CHANGELOG.md) for historical changes.
 
-<p align="center">
-    <a href="README_CN.md">中文</a> |
-    <a href="README.md">English</a> |
-    <a href="https://fnzero.dev/">Website</a> |
-    <a href="https://t.me/fnzero_group">Telegram</a> |
-    <a href="https://discord.gg/vuazbGkqQE">Discord</a>
-</p>
+## Contents
 
-`sol-shred-sdk` is a low-latency Rust SDK for Solana raw shred decoding, ShredStream ingestion, and multi-DEX transaction event parsing.
+- [Related SDKs](#related-sdks)
+- [Installation](#installation)
+- [What This SDK Provides](#what-this-sdk-provides)
+- [Use Cases](#use-cases)
+- [Trade provenance and parsing boundaries](#trade-provenance-and-parsing-boundaries)
+- [Documentation](#documentation)
+- [Decode mode](#decode-mode)
+- [Raw UDP subscriptions](#raw-udp-event-subscription)
+- [Queue subscriptions](#queue-subscription)
 
-The default, lowest-latency path is:
+<a id="related-sdks"></a>
 
-```text
-UDP packet -> Solana/Agave Shred -> FEC recovery -> deshred -> Entry -> VersionedTransaction -> event parser
+## Related SDKs
+
+Repositories are versioned independently; follow each SDK’s installation guide for compatible dependencies.
+
+| Language | Repository | Purpose | Version |
+|----------|------------|-------------|---------|
+| Rust | [sol-parser-sdk](https://github.com/0xfnzero/sol-parser-sdk) | DEX transaction and account event parsing | `v0.9.0` |
+| Node.js | [sol-parser-sdk-nodejs](https://github.com/0xfnzero/sol-parser-sdk-nodejs) | DEX transaction and account event parsing | `v0.9.0` |
+| Python | [sol-parser-sdk-python](https://github.com/0xfnzero/sol-parser-sdk-python) | DEX transaction and account event parsing | `v0.9.0` |
+| Go | [sol-parser-sdk-golang](https://github.com/0xfnzero/sol-parser-sdk-golang) | DEX transaction and account event parsing | `v0.9.0` |
+| Rust | [sol-trade-sdk](https://github.com/0xfnzero/sol-trade-sdk) | Transaction building, signing and multi-channel submission | `v9.0.0` |
+| Node.js | [sol-trade-sdk-nodejs](https://github.com/0xfnzero/sol-trade-sdk-nodejs) | Transaction building, signing and multi-channel submission | `v9.0.0` |
+| Python | [sol-trade-sdk-python](https://github.com/0xfnzero/sol-trade-sdk-python) | Transaction building, signing and multi-channel submission | `v9.0.0` |
+| Go | [sol-trade-sdk-golang](https://github.com/0xfnzero/sol-trade-sdk-golang) | Transaction building, signing and multi-channel submission | `v9.0.0` |
+| Rust | [sol-shred-sdk](https://github.com/0xfnzero/sol-shred-sdk) | Raw shred decoding and ShredStream instruction events | `v6.0.0` |
+| Rust | [solana-streamer](https://github.com/0xfnzero/solana-streamer) | gRPC / ShredStream subscriptions and event streaming | `v5.0.0` |
+| Rust | [sol-trade-router-sdk](https://github.com/0xfnzero/sol-trade-router-sdk) | On-chain multi-hop router and client SDK | `v0.3.0` |
+
+<a id="installation"></a>
+
+## Installation
+
+```toml
+# Add to your Cargo.toml
+[dependencies]
+sol-shred-sdk = "6.0.0"
 ```
 
-Source/decode mode is selected with `ShredDecodeMode`. Native raw UDP shreds are the recommended path; Jito-style ShredStream gRPC entries are retained as a compatibility source while Jito service availability lasts.
+PumpFun create/create_v2 account layout and RPC regression details: [PUMPFUN_CREATE_LAYOUT.md](docs/PUMPFUN_CREATE_LAYOUT.md).
+
+### Use from source
+
+Clone this project to your project directory:
+
+```bash
+cd your_project_root_directory
+git clone https://github.com/0xfnzero/sol-shred-sdk
+```
+
+Add the dependency to your `Cargo.toml`:
+
+```toml
+# Add to your Cargo.toml
+sol-shred-sdk = { path = "./sol-shred-sdk", version = "6.0.0" }
+```
+
+<a id="what-this-sdk-provides"></a>
 
 ## What This SDK Provides
 
@@ -92,6 +98,8 @@ Migrated parser families match the `sol-parser-sdk` parser surface:
 - Meteora Pools, DAMM V2, DBC, DLMM
 - Token accounts, nonce accounts, selected DEX account state events, and block metadata types
 
+<a id="use-cases"></a>
+
 ## Use Cases
 
 - Solana low-latency trading bots and sniper bots
@@ -106,33 +114,15 @@ Raw shred subscriptions parse transaction-visible instruction data directly from
 SDK compatibility, but raw shreds do not carry execution logs or account update
 payloads by themselves.
 
-## Installation
+<a id="trade-provenance-and-parsing-boundaries"></a>
 
-### Direct Clone
+## Trade provenance and parsing boundaries
 
-Clone this project to your project directory:
+Raw shreds and ShredStream gRPC carry pre-execution transactions, not Yellowstone execution metadata. This path sees outer instructions and locally resolved accounts. An unknown third-party instruction referencing Pump.fun in its own accounts can produce a `PumpFunTrade` candidate with the original input in `third_program` and `Unresolved` status. This does not establish execution, direction or amounts. Buy/sell-only filters do not treat an unknown direction as a fill.
 
-```bash
-cd your_project_root_directory
-git clone https://github.com/0xfnzero/sol-shred-sdk
-```
+The parsing hot path performs no RPC. Check `parse_status` before interpreting defaults as amounts. Original account order and instruction bytes remain in `third_program`; transaction position and receive time remain in event metadata. A local Shred index is not confirmed slot-wide execution order. See [wrapped transactions](docs/wrapped-pumpfun.md).
 
-Add the dependency to your `Cargo.toml`:
-
-```toml
-# Add to your Cargo.toml
-sol-shred-sdk = { path = "./sol-shred-sdk", version = "5.0.0" }
-```
-
-### Use crates.io
-
-```toml
-# Add to your Cargo.toml
-[dependencies]
-sol-shred-sdk = "5.0.0"
-```
-
-PumpFun create/create_v2 account layout and RPC regression details: [PUMPFUN_CREATE_LAYOUT.md](docs/PUMPFUN_CREATE_LAYOUT.md).
+<a id="pumpswap-effective-quote-reserves"></a>
 
 ## PumpSwap Effective Quote Reserves
 
@@ -168,6 +158,8 @@ effective reserve fits in `u64`; the helper returns `None` for a negative sum or
 a sum above `u64::MAX`. A valid sum does not establish Pool/vault snapshot
 consistency; maintain that consistency in the account cache. See the [official negative reserve update](https://github.com/pump-fun/pump-public-docs/blob/main/docs/NEGATIVE_VIRTUAL_QUOTE_RESERVES.md).
 
+<a id="decode-mode"></a>
+
 ## Decode Mode
 
 Choose the source/decoder when creating the client:
@@ -183,6 +175,8 @@ let jito = ShredStreamClient::new_with_decode_mode(
     ShredDecodeMode::jito_grpc("http://127.0.0.1:10000"),
 ).await?;
 ```
+
+<a id="raw-udp-event-subscription"></a>
 
 ## Raw UDP Event Subscription
 
@@ -222,6 +216,8 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
+<a id="queue-subscription"></a>
+
 ## Queue Subscription
 
 For consumers that prefer polling:
@@ -247,6 +243,8 @@ For legacy PumpFun/Bonk-only consumers, `subscribe_pumpfun`,
 `subscribe_pumpfun_callback`, and the generic `subscribe_with_parser` APIs are
 still available.
 
+<a id="low-level-decoder"></a>
+
 ## Low-Level Decoder
 
 Use the low-level API when you already own the UDP receive loop:
@@ -267,6 +265,8 @@ fn handle_packet(decoder: &mut RawShredDecoder, packet: &[u8]) {
 
 let mut decoder = RawShredDecoder::new(RawShredConfig::default());
 ```
+
+<a id="custom-transaction-parser"></a>
 
 ## Custom Transaction Parser
 
@@ -302,6 +302,8 @@ impl TransactionEventParser for MyParser {
 }
 ```
 
+<a id="configuration-notes"></a>
+
 ## Configuration Notes
 
 - `RawShredConfig::udp_payload_prefix_skip` should stay `0` for native raw shreds.
@@ -312,6 +314,8 @@ impl TransactionEventParser for MyParser {
 - The UDP receive buffer is requested with `socket2`; the OS may cap the actual value.
 - Merkle FEC recovery follows Agave's wire layout and Jito's threshold rule: recovery starts only after at least `num_data_shreds` distinct data/coding shards are available.
 - Raw UDP decoding does not verify leader signatures because it has no leader schedule. Use a trusted local forwarder, or verify shreds before calling `RawShredDecoder` when accepting untrusted UDP sources.
+
+<a id="decoder-benchmark"></a>
 
 ## Decoder Benchmark
 
@@ -326,6 +330,8 @@ Current local reference result:
 ```text
 packets_per_sec=3276089 slots_per_sec=102378 tx_per_sec=3276089
 ```
+
+<a id="instruction-account-context"></a>
 
 ## Instruction account context
 
@@ -466,134 +472,31 @@ and exact integer payout splits. Swap, quote, and LP paths are unchanged.
 See the [migration guide](docs/cpmm-creator-fee-upgrade.md) for account indices,
 API examples, and collection-time rounding.
 
-## License
+<a id="real-mainnet-rpc-examples"></a>
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-### Telegram group
-
-https://t.me/fnzero_group
-
-### Real mainnet RPC examples
+## Real mainnet RPC examples
 
 See [examples](examples/README.md) for live RPC fetching, offline replay of eleven captured transactions, and wire/token-balance validation.
 
+<a id="pump-upgrade-october-2026"></a>
 
 ## Pump upgrade (October 2026)
 
 Compact Pump v3 and PumpSwap v2 trades use their new 17-account layouts. New typed events cover `PumpFunPostCompleteBuy`, `PumpFunComplete`, `PumpFunSweepBondingCurveFee` and `PumpSwapSweepPoolFee`, with program-scoped log and CPI parsing. Historical SOL CompleteEvent payloads remain supported. Curve/pool retained fees and synthetic counters are exposed; optional historical tails default to zero.
 
-For a synthetic completing buy, retain TradeEvent **and** PostCompleteBuyEvent and aggregate execution amounts within the same invocation. CompleteEvent is the completion notification. For `multi_hop_swap`, retain each venue's trade events; different venues are not merged into one fill. The multi-hop intent decoder exposes the fixed user accounts, input/minimum limits and 5 roles per hop; these limits are not actual executed amounts. Streamer forwards the typed events and account fields through its parser bridge (its re-exported `parser_sdk` also provides the intent decoder).
+For completing buys, aggregate TradeEvent and PostCompleteBuyEvent amounts within the same invocation. CompleteEvent is a notification. Multi-hop execution retains each venue’s trade events in order; separate venues are not merged into one fill. There is no route-intent decoder or raw-event callback. Shred candidates carry original wrapper input in third_program and remain unresolved; gRPC/RPC uses actual execution metadata.
 
 Reference: [pump-public-docs](https://github.com/pump-fun/pump-public-docs/tree/8cda1fa30ea658b20909d8aedf002047119388d2). Validation uses offline official IDL fixtures; no live trade is sent by the tests.
 
 See [real RPC examples and validation limits](examples/PUMPSWAP_RPC.md).
 
-## v4.0.6 — Pump route event support
+<a id="repeatable-offline-pump-simulations"></a>
 
-Route intents expose `is_buy` and `ix_name`, using existing trade field names and official IDL names. RapidBuy reports a buy intent and `buy_exact_quote_in_v2`; BuyPumpDelta reports only a buy intent. Multi-hop direction and unknown methods remain null. Currencies remain in `hops[].base_mint` / `quote_mint`. These hints do not confirm execution; filtering does not convert intents into trades.
+## Offline Pump replay
 
-Streamer forwards complete route payloads as `DexEvent::PumpRouteIntentEvent` with protocol/event filtering. Old JSON defaults missing hints to unknown. Rust struct literals need the new fields; exhaustive streamer event matches need the new variant.
+Run `cargo run --example pump_raw_replay` to inspect decoded instructions and unresolved third-party candidates. Original input is preserved in `third_program`; no RPC is called by the parser. See [wrapper behavior](docs/wrapped-pumpfun.md). Saved transactions are replay evidence, not a live simulation.
 
-## v4.0.5 — Pump routes and offline replay
-
-Adds native Pump route-intent parsing for official multi-hop instructions and the exact RapidBuy/BuyPumpDelta wrapper layouts captured in reported transactions. Adds locally cached ALT resolution and rejects unresolved account identities by default, with explicit best-effort compatibility APIs where supported. Route intents expose instruction constraints and hop identities; confirmed execution amounts require execution metadata.
-
-Includes the latest complete implementation, signed transaction fixtures, native offline-bank regression examples and reproducible local hot-path benchmarks. Unknown wrapper layouts are not inferred from embedded bytes. Local tests do not measure production network latency.
-
-## v4.0.4 — Pump depth-2 compatibility
-
-Adds signed Pump depth-2 create-event replay coverage, including ALT-loaded accounts and executed logs. Existing event layouts and public parsing interfaces remain unchanged.
-
-Validation includes official Pump SDK 4.1.0 instruction comparisons, signed local LiteSVM simulations and SDK regressions. Local simulation state/config is synthetic; no funded transactions were broadcast and production latency was not measured.
-
-## v4.0.3 — Signed transaction and hot-path hardening
-
-Hardens signed shred/FEC replay, rejection recovery, loaded-address and wire boundaries. Aligns DEX instruction/account layouts, compact Pump/PumpSwap events, CPMM creator fees, route attribution and liquidity/reward parsing. Malformed protobuf program keys remain unknown rather than being classified as SystemProgram. Adds signed transaction and offline bank regression fixtures.
-
-Validation includes local CPU benchmarks and offline signed-bank scenarios. Measured hot paths use cached inputs without RPC. Benchmarks do not establish production network or transaction-landing latency. No funded mainnet transactions were broadcast.
-
-
-### Pump routes in ShredStream (offline, before execution)
-
-The DEX shred parser recognizes official `multi_hop_swap` and
-`multi_hop_curve_swap`, plus the captured RapidBuy (`rapidV5DA…`, 41-byte layout)
-and BuyPumpDelta (`J7pourVw…`, 28-byte layout) wrapper versions. It emits
-`DexEvent::PumpRouteIntent`, with the original instruction index, user, input and
-output accounts, route hops and original instruction data. A two-hop route is
-**one route event with two hops**; three separate wrapper calls produce three
-route events. Unknown programs or changed layouts are not guessed by scanning
-for embedded Pump bytes.
-
-**These events are intents, not confirmed fills.** They contain no execution
-status, actual fill amounts, reserves or post balances. `amount_in` and
-`min_amount_out` are explicit instruction constraints where decoded; BuyPumpDelta
-chooses its input at runtime, so these fields are `None`. Failed or conditional
-execution cannot be determined from raw shreds. Use execution metadata for fills.
-
-Subscribe with `EventType::PumpRouteIntent`. Broad `PumpFunTrade` subscriptions
-also receive route intents; official `MultiHopSwap` routes can contain both Pump
-families and also match `PumpSwapTrade`. Direction-specific buy/sell and create
-filters do not match route intents. `exclude_types([PumpRouteIntent])` suppresses
-all intents. Consumers must handle the new `DexEvent::PumpRouteIntent` variant
-rather than assuming every callback is a trade variant.
-
-`filter: None` already includes route intents; changing the filter does not
-convert them into `PumpFunTrade`. For RapidBuy and BuyPumpDelta, `is_buy` is
-`Some(true)`, relative to `hops[0].base_mint`; the payment mint is
-`hops[0].quote_mint`. RapidBuy also exposes
-`ix_name = Some("buy_exact_quote_in_v2")` from its validated embedded
-instruction. BuyPumpDelta's expected method is unknown (`None`). Both hints
-are `None` for multi-hop routes. These are pre-execution hints, not proof of
-a successful CPI. Older serialized events deserialize with unknown hints.
-
-```rust,ignore
-if let DexEvent::PumpRouteIntent(intent) = event {
-    println!("buy intent: {:?}, expected method: {:?}",
-        intent.is_buy, intent.ix_name);
-    for hop in &intent.hops {
-        println!("base: {}, quote: {}", hop.base_mint, hop.quote_mint);
-    }
-}
-```
-
-The new optional fields preserve JSON read compatibility, but downstream Rust
-code constructing `PumpRouteIntentEvent` literals must supply the two fields.
-
-ALT addresses must come from a prewarmed, slot-aware local cache. Both SDKs expose
-`shredstream::parse_transaction_dex_events_with_loaded_addresses`: pass all loaded
-writable addresses, then all loaded readonly addresses, in the message lookup
-order. Count/index errors return before appending events. The caller must ensure
-address identity and lookup-table activation at the transaction slot. The default
-parser skips unresolved instruction accounts instead of emitting placeholder
-pubkeys. `parse_transaction_dex_events_best_effort` retains the older provisional
-behavior for direct instructions; route adapters always require resolved keys.
-
-High-level clients accept `with_address_lookup_resolver(|transaction, slot| ...)`,
-returning `LoadedAddresses` from your cache. Cache errors skip the transaction;
-without a resolver, fully static instructions can still parse. Do not perform RPC
-or blocking I/O in this synchronous callback. The SDK parsing path performs no
-RPC, simulation, or transaction submission.
-
-Regression coverage includes the six original signed mainnet transaction wires,
-ALT/filter/error cases, signed static official routes, and malformed/truncated
-instructions. Run `cargo test --test pump_shred_routes`. The tests are offline;
-synthetic signing validates extraction and does not simulate program execution.
-
-### Repeatable offline Pump simulations
-
-Run the native Rust example and tests:
-
-```sh
-cargo run --offline --example pump_offline_bank
-cargo test --offline --test pump_offline_bank --test pump_shred_routes
-```
-
-The example signs and executes 20 route scenarios against frozen deployed programs
-in LiteSVM twice, checks rollback/signature/ALT behavior and validates SDK parsing.
-The integration test reuses the example code. No Python, RPC calls or broadcasts are
-required. See [configuration, snapshot provenance and scope](examples/offline_bank/README.md).
-
+<a id="reproducible-local-hot-path-latency"></a>
 
 ## Reproducible local hot-path latency
 
@@ -614,3 +517,27 @@ event counts. Two unsigned synthetic cases measure irrelevant-program and
 unknown-discriminator rejection. Output-vector storage is reused. Measurements
 exclude signature verification, fixture loading, network reception, and bank
 execution; they do not establish production ShredStream latency.
+
+<a id="documentation"></a>
+
+## Documentation
+
+- [Release and migration](RELEASE_NOTES.md)
+- [Usage guide](docs/wrapped-pumpfun.md)
+- [Examples](examples/README.md)
+
+
+<a id="license"></a>
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+<a id="telegram-group"></a>
+
+## Telegram group
+
+https://t.me/fnzero_group
+
+
+Shared stock bridges: 34 official stock/ETF mints and 63 pools. See [eleven-SDK catalog and routing alignment](docs/STOCK_BRIDGE_SYNC.md) for configuration, USDC routing and cache-only boundaries.

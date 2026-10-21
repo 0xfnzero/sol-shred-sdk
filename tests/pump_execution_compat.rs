@@ -121,8 +121,8 @@ async fn both_legacy_shred_transports_forward_raw_wrappers() {
         let raw: Vec<_> = events
             .iter()
             .filter_map(|e| {
-                if let PumpfunEvent::RawInstruction(r) = e {
-                    Some(r)
+                if let PumpfunEvent::PumpFunTrade(r) = e {
+                    r.third_program.as_ref()
                 } else {
                     None
                 }
@@ -173,7 +173,7 @@ async fn both_legacy_shred_transports_forward_raw_wrappers() {
         assert_eq!(
             received
                 .iter()
-                .filter(|e| matches!(e, PumpfunEvent::RawInstruction(_)))
+                .filter(|e| matches!(e, PumpfunEvent::PumpFunTrade(_)))
                 .count(),
             1
         );
