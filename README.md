@@ -1,19 +1,34 @@
 <div align="center">
-    <h1>Sol Shred SDK</h1>
-    <p>Solana raw shred decoding and DEX event parsing</p>
-    <a href="https://crates.io/crates/sol-shred-sdk"><img src="https://img.shields.io/crates/v/sol-shred-sdk.svg" alt="sol-shred-sdk"></a>
-    <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
+    <h1>⚡ Sol Shred SDK</h1>
+    <h3><em>Low-latency Solana raw shred decoding and multi-DEX event parsing</em></h3>
 </div>
 
 <p align="center">
-    <a href="README.md">English</a> · <a href="README_CN.md">中文</a> ·
-    <a href="examples/README.md">Examples</a> ·
-    <a href="docs/wrapped-pumpfun.md">Documentation</a> ·
-    <a href="RELEASE_NOTES.md">Release and migration</a> ·
-    <a href="#related-sdks">Related SDKs</a>
+    <strong>A high-performance Rust SDK that turns Solana UDP shreds or Jito-style ShredStream entries into typed DEX events for trading bots, indexers, and real-time analytics.</strong>
 </p>
 
-Decode UDP shreds or ShredStream entries into transactions and DEX instruction events for monitoring, indexing and low-latency subscriptions.
+<p align="center">
+    <a href="https://crates.io/crates/sol-shred-sdk"><img src="https://img.shields.io/crates/v/sol-shred-sdk.svg" alt="Crates.io"></a>
+    <a href="https://docs.rs/sol-shred-sdk"><img src="https://docs.rs/sol-shred-sdk/badge.svg" alt="Documentation"></a>
+    <a href="https://github.com/0xfnzero/sol-shred-sdk/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
+    <a href="https://github.com/0xfnzero/sol-shred-sdk"><img src="https://img.shields.io/github/stars/0xfnzero/sol-shred-sdk?style=social" alt="GitHub stars"></a>
+    <a href="https://github.com/0xfnzero/sol-shred-sdk/network"><img src="https://img.shields.io/github/forks/0xfnzero/sol-shred-sdk?style=social" alt="GitHub forks"></a>
+</p>
+
+<p align="center">
+    <img src="https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white" alt="Rust">
+    <img src="https://img.shields.io/badge/Solana-9945FF?style=for-the-badge&logo=solana&logoColor=white" alt="Solana">
+    <img src="https://img.shields.io/badge/ShredStream-FF6B6B?style=for-the-badge&logo=lightning&logoColor=white" alt="ShredStream">
+    <img src="https://img.shields.io/badge/DEX-4B8BBE?style=for-the-badge&logo=bitcoin&logoColor=white" alt="DEX Events">
+</p>
+
+<p align="center">
+    <a href="https://github.com/0xfnzero/sol-shred-sdk/blob/main/README_CN.md">中文</a> |
+    <a href="https://github.com/0xfnzero/sol-shred-sdk/blob/main/README.md">English</a> |
+    <a href="https://fnzero.dev/">Website</a> |
+    <a href="https://t.me/fnzero_group">Telegram</a> |
+    <a href="https://discord.gg/vuazbGkqQE">Discord</a>
+</p>
 
 Current version: **6.0.1**. Read the [migration notes](RELEASE_NOTES.md) before upgrading; see the [changelog](CHANGELOG.md) for historical changes.
 

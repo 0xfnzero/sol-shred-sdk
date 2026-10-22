@@ -1,19 +1,34 @@
 <div align="center">
-    <h1>Sol Shred SDK</h1>
-    <p>Solana 原始 Shred 解码与 DEX 事件解析</p>
-    <a href="https://crates.io/crates/sol-shred-sdk"><img src="https://img.shields.io/crates/v/sol-shred-sdk.svg" alt="sol-shred-sdk"></a>
-    <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
+    <h1>⚡ Sol Shred SDK</h1>
+    <h3><em>低延迟 Solana 原始 Shred 解码与多 DEX 事件解析</em></h3>
 </div>
 
 <p align="center">
-    <a href="README.md">English</a> · <a href="README_CN.md">中文</a> ·
-    <a href="examples/README.md">示例</a> ·
-    <a href="docs/wrapped-pumpfun.md">文档</a> ·
-    <a href="RELEASE_NOTES.md">发布与迁移</a> ·
-    <a href="#related-sdks">相关 SDK</a>
+    <strong>高性能 Rust SDK，将 Solana UDP Shred 或 Jito 风格 ShredStream Entry 转换为强类型 DEX 事件，适用于交易机器人、索引服务和实时分析。</strong>
 </p>
 
-将 UDP Shred 或 ShredStream Entries 解码为交易和 DEX 指令事件，适用于交易监控、索引和低延迟订阅。
+<p align="center">
+    <a href="https://crates.io/crates/sol-shred-sdk"><img src="https://img.shields.io/crates/v/sol-shred-sdk.svg" alt="Crates.io"></a>
+    <a href="https://docs.rs/sol-shred-sdk"><img src="https://docs.rs/sol-shred-sdk/badge.svg" alt="Documentation"></a>
+    <a href="https://github.com/0xfnzero/sol-shred-sdk/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
+    <a href="https://github.com/0xfnzero/sol-shred-sdk"><img src="https://img.shields.io/github/stars/0xfnzero/sol-shred-sdk?style=social" alt="GitHub stars"></a>
+    <a href="https://github.com/0xfnzero/sol-shred-sdk/network"><img src="https://img.shields.io/github/forks/0xfnzero/sol-shred-sdk?style=social" alt="GitHub forks"></a>
+</p>
+
+<p align="center">
+    <img src="https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white" alt="Rust">
+    <img src="https://img.shields.io/badge/Solana-9945FF?style=for-the-badge&logo=solana&logoColor=white" alt="Solana">
+    <img src="https://img.shields.io/badge/ShredStream-FF6B6B?style=for-the-badge&logo=lightning&logoColor=white" alt="ShredStream">
+    <img src="https://img.shields.io/badge/DEX-4B8BBE?style=for-the-badge&logo=bitcoin&logoColor=white" alt="DEX Events">
+</p>
+
+<p align="center">
+    <a href="https://github.com/0xfnzero/sol-shred-sdk/blob/main/README_CN.md">中文</a> |
+    <a href="https://github.com/0xfnzero/sol-shred-sdk/blob/main/README.md">English</a> |
+    <a href="https://fnzero.dev/">Website</a> |
+    <a href="https://t.me/fnzero_group">Telegram</a> |
+    <a href="https://discord.gg/vuazbGkqQE">Discord</a>
+</p>
 
 当前版本：**6.0.1**。升级前请阅读 [迁移说明](RELEASE_NOTES.md)；历史变更见 [版本记录](CHANGELOG_CN.md)。
 
