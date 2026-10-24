@@ -1,10 +1,21 @@
-//! Current Delta wrapper: preserve raw accounts/data, never infer the internal sell.
+//! Raw wrapper replay; --multi-hop selects the reported official PumpSwap route.
 use base64::{engine::general_purpose::STANDARD, Engine};
 use sol_shred_sdk::{transaction::VersionedTransaction, Pubkey};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let f: serde_json::Value =
-        serde_json::from_str(include_str!("fixtures/pump_raw_20261019.json"))?;
+    let f: serde_json::Value = if std::env::args().nth(1).as_deref() == Some("--multi-hop") {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/pump_multi_hop_20261025.json"
+        ))?;
+        let case = &fixture["cases"][0];
+        serde_json::json!({
+            "signature": case["signature"], "slot": case["wire_rpc"]["slot"],
+            "wire": case["wire_rpc"]["transaction"][0],
+            "loaded_writable": [], "loaded_readonly": []
+        })
+    } else {
+        serde_json::from_str(include_str!("fixtures/pump_raw_20261019.json"))?
+    };
     let tx: VersionedTransaction =
         wincode::deserialize_exact(&STANDARD.decode(f["wire"].as_str().unwrap())?)?;
     assert_eq!(
@@ -31,8 +42,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         None,
         &mut events,
     )?;
-    assert!(events.iter().any(|e| e.trade_parse_status()
-        == Some(sol_shred_sdk::core::events::TradeParseStatus::Unresolved)));
+    assert!(events.iter().any(|e| e.third_program().is_some()));
     println!("{}", serde_json::to_string_pretty(&events)?);
     Ok(())
 }

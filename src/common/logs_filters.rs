@@ -63,6 +63,16 @@ impl LogFilter {
         let pump_index = accounts.iter().position(|key| key == &PUMPFUN_PROGRAM_ID);
         let mut instructions: Vec<DexInstruction> = Vec::new();
         for (index, ix) in compiled_instructions.iter().enumerate() {
+            Self::multi_hop_instructions(
+                accounts,
+                usize::from(ix.program_id_index),
+                &ix.accounts,
+                &ix.data,
+                index,
+                versioned_tx.signatures.first().copied().unwrap_or_default(),
+                0,
+                &mut instructions,
+            );
             if let Some(raw) = Self::raw_instruction(
                 accounts,
                 usize::from(ix.program_id_index),
@@ -193,6 +203,35 @@ impl LogFilter {
         Ok(instructions)
     }
 
+    fn multi_hop_instructions(
+        keys: &[Pubkey],
+        program_index: usize,
+        accounts: &[u8],
+        data: &[u8],
+        instruction_index: usize,
+        signature: solana_sdk::signature::Signature,
+        slot: u64,
+        instructions: &mut Vec<DexInstruction>,
+    ) {
+        if keys.get(program_index) != Some(&crate::instr::program_ids::PUMPSWAP_PROGRAM_ID)
+            || !data.starts_with(&crate::shredstream::pump_multi_hop::MULTI_HOP_SWAP)
+        {
+            return;
+        }
+        crate::shredstream::pump_multi_hop::parse_curve_hops(
+            data,
+            accounts,
+            keys,
+            instruction_index,
+            crate::core::EventMetadata {
+                signature,
+                slot,
+                ..Default::default()
+            },
+            |trade| instructions.push(DexInstruction::PumpFunTrade(Box::new(trade))),
+        );
+    }
+
     fn raw_instruction(
         keys: &[Pubkey],
         program_index: usize,
@@ -290,6 +329,16 @@ impl LogFilter {
                 .first()
                 .and_then(|bytes| solana_sdk::signature::Signature::try_from(bytes.as_slice()).ok())
                 .unwrap_or_default();
+            Self::multi_hop_instructions(
+                &accounts_pubkeys,
+                ix.program_id_index as usize,
+                &ix.accounts,
+                &ix.data,
+                index,
+                signature,
+                transaction_update.slot,
+                &mut instructions,
+            );
             if let Some(raw) = Self::raw_instruction(
                 &accounts_pubkeys,
                 ix.program_id_index as usize,

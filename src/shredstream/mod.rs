@@ -9,6 +9,7 @@ mod client;
 mod config;
 pub mod dex;
 pub mod pump_ix;
+pub(crate) mod pump_multi_hop;
 
 pub mod proto {
     tonic::include_proto!("shredstream");

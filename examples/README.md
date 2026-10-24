@@ -95,3 +95,16 @@ RPC 使用 `getTransaction`、`base64`、`finalized`、`maxSupportedTransactionV
 RPC 网络请求与 JSON/base64 解码属于验证工具，不进入 SDK 的 shred 解析热路径。这些测试不用于证明超低延迟。
 
 collection 样本涉及 Token-2022，只有 1 个账户满足当前净余额校验条件。历史 CreatorFeeShare/AmmConfig 费率状态未保存，当前链上状态不等于 collection 时的历史状态；因此此样本验证了指令布局、PDA 和可核对的余额，未独立验证协议分成费率及 payout 计算。
+
+Official PumpSwap multi-hop input replay (no RPC):
+
+```sh
+cargo run --offline --example pump_raw_replay -- --multi-hop
+```
+
+Emits `PumpFunTrade` for each identifiable bonding-curve hop, with
+`ix_name = "multi_hop_swap"` and the original accounts/data in `third_program`.
+`InstructionDecoded` is not an executed fill: intermediate amounts require
+execution metadata, and the route's total input must not be copied into every hop.
+All-AMM routes do not produce PumpFun callbacks. 中文：此示例只回放指令，Shred
+回调中的成交量为零不代表真实成交为零；原始输入可由调用者继续处理。
