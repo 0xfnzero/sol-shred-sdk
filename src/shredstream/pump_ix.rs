@@ -935,7 +935,7 @@ fn parse_pumpfun_instruction(
         discriminators::BUY_V3 | discriminators::BUY_EXACT_QUOTE_IN_V3
     ) {
         if let DexEvent::PumpFunBuy(trade) = &mut event {
-            trade.is_created_buy = created_mints.contains(&trade.mint);
+            trade.is_created_buy = trade.is_buy && created_mints.contains(&trade.mint);
             trade.mayhem_mode = mayhem_mints.contains(&trade.mint);
         }
     }

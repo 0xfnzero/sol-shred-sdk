@@ -267,6 +267,8 @@ fn fill_create_quote_accounts(
 /// 12 mayhem_state, 13 mayhem_token_vault, 14 event_authority, 15 program.
 /// Quote remaining accounts follow the official SDK after the fixed IDL account list.
 pub fn fill_create_accounts_from_v2(e: &mut PumpFunCreateTokenEvent, get: &AccountGetter<'_>) {
+    // CreateEvent is shared by create/create_v2; the actual invocation names it.
+    e.ix_name = "create_v2".into();
     if e.mint == Pubkey::default() {
         e.mint = get(create_v2_accounts::MINT);
     }
