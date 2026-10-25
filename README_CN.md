@@ -315,10 +315,15 @@ tick arrays 不再截断为 16 个。`fill_clmm_swap_accounts_with_count` 接收
 对于 V0 交易，可使用 `parse_transaction_dex_events_with_loaded_addresses`，按消息
 lookup 顺序传入调用方从缓存或 RPC 解析的 writable、readonly ALT 地址。该入口在
 追加事件前校验地址数量及指令索引，内部不发起 RPC 请求。默认入口使用静态账户，
-跳过程序或账户地址未解析完整的指令；PumpFun V2 交易要求与 gRPC 相同的账户布局
+已确认程序 ID 的 Pump.fun 外层指令在 ALT 未展开时仍回调创建/交易事件，缺失账户
+（含 V2/V3 报价 mint、Token Program）保留默认值，不猜测未知程序。
+其它 DEX 仍要求账户完整；PumpFun V2 交易要求与 gRPC 相同的账户布局
 （买入至少 27 个，卖出至少 26 个）。同交易中其余完整指令继续解析。
 `parse_transaction_dex_events_best_effort` 显式保留旧版按 discriminator 猜测协议、
 缺失账户填默认值的行为；该入口的暂定结果不保证与 gRPC 对齐。
+
+运行 `cargo run --example pump_raw_replay -- --create-alt`，可回放反馈的三笔
+`create_v2` + 买入交易。编译选项由调用方自行配置，仓库不再提供 `.cargo/config.toml`。
 
 可用信息的对齐以 gRPC 外层指令解析为基准，覆盖 PumpFun/PumpSwap/Pump Fees、Raydium
 AMM V4/CLMM/CPMM/LaunchLab、Meteora Pools/DAMM V2/DLMM、Orca Whirlpool。

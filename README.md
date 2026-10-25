@@ -367,12 +367,18 @@ the first absent/default address.
 For V0 transactions, `parse_transaction_dex_events_with_loaded_addresses`
 accepts caller-resolved writable and readonly ALT addresses in message lookup
 order. It validates counts and instruction indices before appending events and
-performs no RPC requests. The default entry point uses static accounts and skips
-instructions with unresolved program or account keys; PumpFun V2 trades also require
+performs no RPC requests. Known Pump.fun outer instructions emit create/trade callbacks
+even with unresolved ALT accounts. Missing addresses, including V2/V3 quote mints and
+token programs, remain defaults. Unknown programs are not guessed, and other DEX
+instructions still require resolved accounts. PumpFun V2 trades also require
 the gRPC account layout (27 buy accounts or 26 sell accounts). Other resolved instructions
 in the same transaction still parse. `parse_transaction_dex_events_best_effort`
 explicitly retains legacy discriminator guesses and missing-account placeholders;
 its provisional results do not guarantee gRPC parity.
+
+Replay the three reported `create_v2` + buy transactions with
+`cargo run --example pump_raw_replay -- --create-alt`.
+Build options are caller-controlled; this repository does not ship `.cargo/config.toml`.
 
 Obtainable-data parity targets gRPC outer instruction parsing across PumpFun,
 PumpSwap, Pump Fees, Raydium AMM V4/CLMM/CPMM/LaunchLab, Meteora

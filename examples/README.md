@@ -96,13 +96,19 @@ RPC 网络请求与 JSON/base64 解码属于验证工具，不进入 SDK 的 shr
 
 collection 样本涉及 Token-2022，只有 1 个账户满足当前净余额校验条件。历史 CreatorFeeShare/AmmConfig 费率状态未保存，当前链上状态不等于 collection 时的历史状态；因此此样本验证了指令布局、PDA 和可核对的余额，未独立验证协议分成费率及 payout 计算。
 
-Official PumpSwap multi-hop input replay (no RPC):
+Pump input replay (no RPC):
 
 ```sh
 cargo run --offline --example pump_raw_replay -- --multi-hop
+# create_v2 + buy_exact_sol_in / buy_v2 / buy_v3, without loaded ALT addresses
+cargo run --offline --example pump_raw_replay -- --create-alt
 ```
 
-Emits `PumpFunTrade` for each identifiable bonding-curve hop, with
+`--create-alt` replays the three signed transactions captured on 2026-10-26.
+Each emits `PumpFunCreate` followed by `PumpFunTrade`; unavailable ALT addresses
+stay at defaults, and instruction inputs are not execution results.
+
+`--multi-hop` emits `PumpFunTrade` for each identifiable bonding-curve hop, with
 `ix_name = "multi_hop_swap"` and the original accounts/data in `third_program`.
 `InstructionDecoded` is not an executed fill: intermediate amounts require
 execution metadata, and the route's total input must not be copied into every hop.

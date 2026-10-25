@@ -6,3 +6,4 @@ Cargo.lock
 **/mutants.out*/
 #.idea/
 .DS_Store
+.cargo/

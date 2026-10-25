@@ -6,6 +6,115 @@ use sol_shred_sdk::{pubkey::Pubkey, signature::Signature};
 use std::{fs, path::PathBuf};
 
 #[test]
+fn reported_create_v2_with_alt_accounts_keeps_create_and_trade_callbacks() {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use sol_shred_sdk::{
+        grpc::{EventType, EventTypeFilter},
+        transaction::VersionedTransaction,
+    };
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/pump_create_alt_20261026.json")).unwrap();
+    let filter =
+        EventTypeFilter::include_only(vec![EventType::PumpFunCreate, EventType::PumpFunTrade]);
+    for (case, method) in
+        fixture["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .zip(["buy_exact_sol_in", "buy_v2", "buy_v3"])
+    {
+        let rpc = &case["wire_rpc"];
+        let signed: VersionedTransaction = wincode::deserialize_exact(
+            &STANDARD
+                .decode(rpc["transaction"][0].as_str().unwrap())
+                .unwrap(),
+        )
+        .unwrap();
+        signed.verify_and_hash_message().unwrap();
+        assert_eq!(
+            signed.signatures[0].to_string(),
+            case["signature"].as_str().unwrap()
+        );
+        let slot = rpc["slot"].as_u64().unwrap();
+        let mut events = Vec::new();
+        sol_shred_sdk::shredstream::pump_ix::parse_transaction_dex_events_with_filter(
+            &signed,
+            signed.signatures[0],
+            slot,
+            888,
+            123456,
+            Some(&filter),
+            &mut events,
+        );
+        assert_eq!(events.len(), 2, "{method}");
+        let DexEvent::PumpFunCreate(create) = &events[0] else {
+            panic!("create must come first")
+        };
+        let DexEvent::PumpFunTrade(trade) = &events[1] else {
+            panic!("missing trade")
+        };
+        assert_eq!(create.ix_name, "create_v2");
+        assert_eq!(trade.ix_name, method);
+        assert_eq!(trade.mint, create.mint);
+        assert_eq!(trade.user, create.user);
+        assert_ne!(create.mint, Pubkey::default());
+        assert!(trade.is_buy && trade.is_created_buy);
+        assert_eq!(
+            (trade.metadata.tx_index, trade.metadata.grpc_recv_us),
+            (888, 123456)
+        );
+        assert_eq!(trade.token_program, Pubkey::default());
+        if method != "buy_exact_sol_in" {
+            assert_eq!(trade.quote_mint, Pubkey::default());
+            assert_eq!(trade.quote_token_program, Pubkey::default());
+        }
+        let keys = |kind: &str| -> Vec<Pubkey> {
+            rpc["meta"]["loadedAddresses"][kind]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|key| key.as_str().unwrap().parse().unwrap())
+                .collect()
+        };
+        let mut resolved = Vec::new();
+        parse_transaction_dex_events_with_loaded_addresses(
+            &signed,
+            &keys("writable"),
+            &keys("readonly"),
+            signed.signatures[0],
+            slot,
+            888,
+            123456,
+            Some(&filter),
+            &mut resolved,
+        )
+        .unwrap();
+        assert_eq!(resolved.len(), 2);
+        let DexEvent::PumpFunTrade(complete) = &resolved[1] else {
+            panic!("resolved trade")
+        };
+        assert_eq!(
+            (
+                trade.mint,
+                &trade.ix_name,
+                trade.amount,
+                trade.max_sol_cost,
+                trade.spendable_sol_in
+            ),
+            (
+                complete.mint,
+                &complete.ix_name,
+                complete.amount,
+                complete.max_sol_cost,
+                complete.spendable_sol_in
+            )
+        );
+        assert_ne!(complete.token_program, Pubkey::default());
+        assert_ne!(complete.quote_mint, Pubkey::default());
+    }
+}
+
+#[test]
 fn merging_unresolved_create_quotes_does_not_invent_sol() {
     use sol_shred_sdk::core::{events::*, merger, pumpfun_fee_enrich};
     let mint = Pubkey::new_unique();
