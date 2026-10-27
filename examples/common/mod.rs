@@ -575,8 +575,8 @@ pub fn validate(j: &Value) -> Result<(usize, TransactionRoute, usize)> {
     let decoded = events
         .iter()
         .filter(|event| {
-            event.trade_parse_status()
-                != Some(sol_shred_sdk::core::events::TradeParseStatus::Unresolved)
+            !matches!(event, sol_shred_sdk::DexEvent::PumpFunTrade(t)
+                if t.third_program.is_some() && t.ix_name.is_empty())
         })
         .count();
     Ok((decoded, route, checked))

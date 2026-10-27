@@ -1,5 +1,5 @@
-//! Trade provenance and evidence accessors for Shred instruction callbacks.
-use super::{DexEvent, RawInstructionPayload, TradeParseStatus};
+//! Trade provenance accessors for Shred instruction callbacks.
+use super::{DexEvent, RawInstructionPayload};
 
 impl DexEvent {
     /// Original outer router instruction, when exact invocation provenance exists.
@@ -21,29 +21,6 @@ impl DexEvent {
             Self::MeteoraDammV2Swap(t) => t.third_program.as_ref(),
             Self::MeteoraDlmmSwap(t) => t.third_program.as_ref(),
             Self::MeteoraDbcSwap(t) => t.third_program.as_ref(),
-            _ => None,
-        }
-    }
-
-    /// Evidence level for a trade; non-trade events return None.
-    pub fn trade_parse_status(&self) -> Option<TradeParseStatus> {
-        match self {
-            Self::PumpFunTrade(t)
-            | Self::PumpFunBuy(t)
-            | Self::PumpFunSell(t)
-            | Self::PumpFunBuyExactSolIn(t) => Some(t.parse_status),
-            Self::PumpSwapTrade(t) => Some(t.parse_status),
-            Self::PumpSwapBuy(t) => Some(t.parse_status),
-            Self::PumpSwapSell(t) => Some(t.parse_status),
-            Self::RaydiumLaunchlabTrade(t) => Some(t.parse_status),
-            Self::RaydiumCpmmSwap(t) => Some(t.parse_status),
-            Self::RaydiumClmmSwap(t) => Some(t.parse_status),
-            Self::RaydiumAmmV4Swap(t) => Some(t.parse_status),
-            Self::OrcaWhirlpoolSwap(t) => Some(t.parse_status),
-            Self::MeteoraPoolsSwap(t) => Some(t.parse_status),
-            Self::MeteoraDammV2Swap(t) => Some(t.parse_status),
-            Self::MeteoraDlmmSwap(t) => Some(t.parse_status),
-            Self::MeteoraDbcSwap(t) => Some(t.parse_status),
             _ => None,
         }
     }

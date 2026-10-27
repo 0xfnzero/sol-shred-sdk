@@ -145,8 +145,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             PumpfunEvent::PumpFunTrade(trade) => {
                 println!(
-                    "Pump.fun candidate ({:?}): {:?}",
-                    trade.parse_status, trade.third_program
+                    "Pump.fun candidate: {:?}", trade.third_program
                 );
             }
             PumpfunEvent::NewUserTrade(trade_info) => {

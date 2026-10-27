@@ -131,9 +131,9 @@ Raw shred 订阅直接从 `Entry` 交易解析交易中可见的指令数据。S
 
 ## 交易来源与解析边界
 
-原始 Shred 与 ShredStream gRPC 携带执行前交易，不包含 Yellowstone 执行元数据。这条路径只能看到外层指令与本地已解析的账户。未知第三方指令在自身账户中引用 Pump.fun 时，可回调 `PumpFunTrade` 候选，携带 `third_program` 原始输入与 `Unresolved` 状态；这不证明交易已执行，也不确定方向或金额。买入／卖出专用过滤器不会把未知方向当作成交。
+原始 Shred 与 ShredStream gRPC 携带执行前交易，不包含 Yellowstone 执行元数据。这条路径只能看到外层指令与本地已解析的账户。未知第三方指令在自身账户中引用 Pump.fun 时，可回调 `PumpFunTrade` 候选，携带 `third_program` 原始输入；这不证明交易已执行，也不确定方向或金额。买入／卖出专用过滤器不会把未知方向当作成交。
 
-解析热路径不调用 RPC。按 `parse_status` 判断证据，缺失字段的默认值不代表实际零成交。账户顺序与原始指令数据保留在 `third_program`；交易序号和接收时间仍在事件元数据中，本地 Shred 序号不等于全 slot 执行顺序。详见 [第三方包装交易](docs/wrapped-pumpfun.md)。
+解析热路径不调用 RPC。缺失字段的默认值不代表实际零成交。账户顺序与原始指令数据保留在 `third_program`；交易序号和接收时间仍在事件元数据中，本地 Shred 序号不等于全 slot 执行顺序。详见 [第三方包装交易](docs/wrapped-pumpfun.md)。
 
 <a id="pumpswap-有效-quote-reserves"></a>
 

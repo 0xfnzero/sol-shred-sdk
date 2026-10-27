@@ -7,7 +7,7 @@ accounts or reconstruct a Pump buy/sell instruction. Consumers interpret the
 original input in the trade event's `third_program`.
 
 On Shred, an unknown outer program referencing Pump.fun in **that instruction's**
-accounts produces a `PumpFunTrade` candidate with `parse_status=Unresolved`.
+accounts produces a `PumpFunTrade` candidate with its original input in `third_program`.
 This does not establish a trade, direction, mint, pool or amount: the program may
 only prepare accounts. Missing trade fields retain defaults, not proven zero fills.
 Broad PumpFunTrade subscriptions receive candidates; buy/sell-only subscriptions
@@ -15,8 +15,7 @@ do not. Other unknown instructions are skipped, without scanning all DEX familie
 
 On gRPC/RPC, supplied execution metadata and actual Pump CPI instructions determine
 the trade. Its exact originating outer instruction fills `third_program`.
-Direct calls have no third-party payload. A successful invocation can be
-`ExecutionConfirmed` even when some execution amounts are unavailable.
+Direct calls have no third-party payload. A successful invocation may still lack some execution amounts when logs are missing.
 
 One outer instruction can invoke zero, one or several trades. Compare signature
 and outer instruction index rather than expecting equal Shred/gRPC event counts.
@@ -40,8 +39,7 @@ resolution; the parsing hot path never calls RPC.
 
 `DexEvent::PumpRouteIntent`, `DexEvent::RawInstruction`, their subscription
 variants and their route/raw parsers have been removed. Remove those subscriptions
-and match arms. Subscribe to PumpFunTrade and inspect `third_program` and
-`parse_status` instead. There is no separate raw callback or built-in wrapper-rule
+and match arms. Subscribe to PumpFunTrade and inspect `third_program` instead. There is no separate raw callback or built-in wrapper-rule
 engine. Official multi-hop instructions no longer emit route-intent callbacks;
 their executed trade legs remain available through gRPC/RPC.
 

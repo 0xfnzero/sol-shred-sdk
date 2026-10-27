@@ -268,7 +268,6 @@ impl LogFilter {
                 account_indices: accounts.to_vec(),
                 instruction_data: data.to_vec(),
             }),
-            parse_status: crate::core::events::TradeParseStatus::Unresolved,
             ..Default::default()
         })
     }

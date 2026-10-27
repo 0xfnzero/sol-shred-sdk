@@ -264,7 +264,13 @@ impl EventTypeFilter {
 
     pub fn should_include_dex_event(&self, event: &crate::core::events::DexEvent) -> bool {
         if let crate::core::events::DexEvent::PumpFunTrade(t) = event {
-            if t.parse_status == crate::core::events::PumpFunParseStatus::Unresolved {
+            if t.third_program.is_some()
+                && (t.ix_name.is_empty()
+                    || (t.ix_name == "multi_hop_swap"
+                        && t.sol_amount == 0
+                        && t.token_amount == 0
+                        && t.quote_amount == 0))
+            {
                 // Unknown direction must not turn the default is_buy=false into
                 // a sell classification. Explicit family exclusion wins.
                 return self.includes_unresolved_pumpfun();

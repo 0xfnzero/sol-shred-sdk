@@ -2,7 +2,7 @@
 use base64::{engine::general_purpose::STANDARD, Engine};
 use sol_shred_sdk::{
     common::{logs_data::DexInstruction, logs_filters::LogFilter},
-    core::events::{DexEvent, TradeParseStatus},
+    core::events::{DexEvent},
     grpc::{EventType, EventTypeFilter},
     transaction::VersionedTransaction,
 };
@@ -49,7 +49,6 @@ fn official_multi_hop_emits_the_curve_across_shred_entry_points() {
         "6Vk3fAQWYEot6JbQb8Nx8j5wZeDnMhzk8FajjHhZpump"
     );
     assert!(event.is_buy && event.is_created_buy);
-    assert_eq!(event.parse_status, TradeParseStatus::InstructionDecoded);
     assert_eq!(
         (event.sol_amount, event.token_amount, event.quote_amount),
         (0, 0, 0)

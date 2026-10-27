@@ -110,7 +110,7 @@ stay at defaults, and instruction inputs are not execution results.
 
 `--multi-hop` emits `PumpFunTrade` for each identifiable bonding-curve hop, with
 `ix_name = "multi_hop_swap"` and the original accounts/data in `third_program`.
-`InstructionDecoded` is not an executed fill: intermediate amounts require
+A decoded instruction is not an executed fill: intermediate amounts require
 execution metadata, and the route's total input must not be copied into every hop.
 All-AMM routes do not produce PumpFun callbacks. 中文：此示例只回放指令，Shred
 回调中的成交量为零不代表真实成交为零；原始输入可由调用者继续处理。
