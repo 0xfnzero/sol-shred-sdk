@@ -191,6 +191,27 @@ let jito = ShredStreamClient::new_with_decode_mode(
 ).await?;
 ```
 
+For providers requiring `x-token` authentication, use the same `auth_token`
+configuration field as `sol-parser-sdk`:
+
+```rust
+use sol_shred_sdk::{ShredStreamClient, ShredStreamConfig};
+
+let config = ShredStreamConfig {
+    auth_token: std::env::var("SHREDSTREAM_X_TOKEN").ok(),
+    ..ShredStreamConfig::jito_grpc("http://127.0.0.1:10000")
+};
+let client = ShredStreamClient::new_with_config(config).await?;
+```
+
+The token defaults to `None`. Surrounding whitespace is trimmed and blank tokens
+are omitted. Both DEX and custom-parser subscriptions send it on each gRPC
+subscription, including reconnects; queue and callback APIs are supported.
+Invalid metadata is logged as a subscription error without sending a subscribe
+request. The token is redacted in debug output and ignored in raw UDP mode.
+Run `cargo run --example shredstream_example` with `SHREDSTREAM_ENDPOINT` and the
+optional `SHREDSTREAM_X_TOKEN` environment variables to try it.
+
 <a id="raw-udp-event-subscription"></a>
 
 ## Raw UDP Event Subscription

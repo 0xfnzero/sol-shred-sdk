@@ -51,19 +51,38 @@ impl ShredDecodeMode {
 }
 
 /// Multi-source ShredStream client configuration.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ShredStreamConfig {
     pub decode_mode: ShredDecodeMode,
+    /// Optional `x-token` metadata for Jito-style gRPC subscriptions.
+    /// Surrounding whitespace is trimmed; blank tokens are omitted. Ignored in raw UDP mode.
+    pub auth_token: Option<String>,
     pub event_queue_capacity: usize,
     pub reconnect_delay_ms: u64,
     /// Maximum restart attempts after a receive-loop error. `0` means forever.
     pub max_reconnect_attempts: u32,
 }
 
+impl std::fmt::Debug for ShredStreamConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ShredStreamConfig")
+            .field("decode_mode", &self.decode_mode)
+            .field(
+                "auth_token",
+                &self.auth_token.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field("event_queue_capacity", &self.event_queue_capacity)
+            .field("reconnect_delay_ms", &self.reconnect_delay_ms)
+            .field("max_reconnect_attempts", &self.max_reconnect_attempts)
+            .finish()
+    }
+}
+
 impl Default for ShredStreamConfig {
     fn default() -> Self {
         Self {
             decode_mode: ShredDecodeMode::default(),
+            auth_token: None,
             event_queue_capacity: 100_000,
             reconnect_delay_ms: 250,
             max_reconnect_attempts: 0,
@@ -79,6 +98,7 @@ impl ShredStreamConfig {
                 max_tracked_slots: 48,
                 ..RawShredConfig::default()
             }),
+            auth_token: None,
             event_queue_capacity: 100_000,
             reconnect_delay_ms: 50,
             max_reconnect_attempts: 0,
@@ -93,6 +113,7 @@ impl ShredStreamConfig {
                 reassembly_gap_timeout: Duration::from_millis(600),
                 ..RawShredConfig::default()
             }),
+            auth_token: None,
             event_queue_capacity: 500_000,
             reconnect_delay_ms: 250,
             max_reconnect_attempts: 0,
@@ -102,6 +123,7 @@ impl ShredStreamConfig {
     pub fn jito_grpc(endpoint: impl Into<String>) -> Self {
         Self {
             decode_mode: ShredDecodeMode::jito_grpc(endpoint),
+            auth_token: None,
             event_queue_capacity: 100_000,
             reconnect_delay_ms: 250,
             max_reconnect_attempts: 0,

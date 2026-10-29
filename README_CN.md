@@ -178,6 +178,24 @@ let jito = ShredStreamClient::new_with_decode_mode(
 ).await?;
 ```
 
+需要 `x-token` 认证的服务商，可使用与 `sol-parser-sdk` 一致的 `auth_token` 配置：
+
+```rust
+use sol_shred_sdk::{ShredStreamClient, ShredStreamConfig};
+
+let config = ShredStreamConfig {
+    auth_token: std::env::var("SHREDSTREAM_X_TOKEN").ok(),
+    ..ShredStreamConfig::jito_grpc("http://127.0.0.1:10000")
+};
+let client = ShredStreamClient::new_with_config(config).await?;
+```
+
+令牌默认值为 `None`，首尾空白会被移除，空字符串或纯空白不会发送。DEX 和自定义
+解析器订阅均支持队列、回调及自动重连，每次 gRPC 订阅都会携带配置的令牌。
+非法 metadata 会记录订阅错误日志，不会发送订阅请求。调试输出隐藏令牌，原始 UDP
+模式忽略该配置。可设置环境变量 `SHREDSTREAM_ENDPOINT` 和可选的
+`SHREDSTREAM_X_TOKEN`，运行 `cargo run --example shredstream_example` 验证。
+
 <a id="raw-udp-事件订阅"></a>
 
 ## Raw UDP 事件订阅

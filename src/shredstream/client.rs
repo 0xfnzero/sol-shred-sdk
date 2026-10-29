@@ -9,6 +9,7 @@ use solana_entry::entry::Entry;
 use solana_sdk::message::{v0::LoadedAddresses, VersionedMessage};
 use solana_sdk::transaction::VersionedTransaction;
 use tokio::task::JoinHandle;
+use tonic::metadata::MetadataValue;
 use tonic::transport::{Channel, Endpoint};
 
 use super::config::{JitoShredStreamConfig, ShredDecodeMode, ShredStreamConfig};
@@ -391,7 +392,15 @@ async fn run_dex_once(
             run_raw_dex_once(raw.clone(), event_type_filter, sink, resolver, stats).await
         }
         ShredDecodeMode::JitoGrpc(jito) => {
-            run_jito_dex_once(jito, event_type_filter, sink, resolver, stats).await
+            run_jito_dex_once(
+                jito,
+                config.auth_token.as_deref(),
+                event_type_filter,
+                sink,
+                resolver,
+                stats,
+            )
+            .await
         }
     }
 }
@@ -425,13 +434,14 @@ async fn run_raw_dex_once(
 
 async fn run_jito_dex_once(
     jito: &JitoShredStreamConfig,
+    auth_token: Option<&str>,
     event_type_filter: Option<&EventTypeFilter>,
     sink: EventSink<DexEvent>,
     resolver: Option<&AddressLookupResolver>,
     stats: &AddressLookupCounters,
 ) -> AnyResult<()> {
+    let request = build_subscribe_request(auth_token)?;
     let mut client = connect_jito(jito).await?;
-    let request = tonic::Request::new(SubscribeEntriesRequest {});
     let mut stream = client.subscribe_entries(request).await?.into_inner();
     let mut events = Vec::with_capacity(4);
 
@@ -629,7 +639,9 @@ where
 {
     match &config.decode_mode {
         ShredDecodeMode::RawUdp(raw) => run_raw_once(raw.clone(), parser, sink).await,
-        ShredDecodeMode::JitoGrpc(jito) => run_jito_once(jito, parser, sink).await,
+        ShredDecodeMode::JitoGrpc(jito) => {
+            run_jito_once(jito, config.auth_token.as_deref(), parser, sink).await
+        }
     }
 }
 
@@ -654,6 +666,7 @@ where
 
 async fn run_jito_once<P>(
     jito: &JitoShredStreamConfig,
+    auth_token: Option<&str>,
     parser: &mut P,
     sink: EventSink<P::Event>,
 ) -> AnyResult<()>
@@ -661,8 +674,8 @@ where
     P: TransactionEventParser + Send + 'static,
     P::Event: Send + 'static,
 {
+    let request = build_subscribe_request(auth_token)?;
     let mut client = connect_jito(jito).await?;
-    let request = tonic::Request::new(SubscribeEntriesRequest {});
     let mut stream = client.subscribe_entries(request).await?.into_inner();
 
     while let Some(message) = stream.next().await {
@@ -687,6 +700,19 @@ where
     }
 
     Err(anyhow::anyhow!("jito gRPC stream ended"))
+}
+
+fn build_subscribe_request(
+    auth_token: Option<&str>,
+) -> AnyResult<tonic::Request<SubscribeEntriesRequest>> {
+    let mut request = tonic::Request::new(SubscribeEntriesRequest {});
+    if let Some(token) = auth_token.map(str::trim).filter(|s| !s.is_empty()) {
+        let mut value = MetadataValue::try_from(token)
+            .map_err(|error| anyhow::anyhow!("Invalid ShredStream x-token metadata: {error}"))?;
+        value.set_sensitive(true);
+        request.metadata_mut().insert("x-token", value);
+    }
+    Ok(request)
 }
 
 async fn connect_jito(
@@ -751,6 +777,44 @@ mod tests {
     };
     use solana_sdk::pubkey::Pubkey;
     use solana_sdk::signature::Signature;
+
+    #[test]
+    fn subscription_request_includes_only_nonempty_trimmed_auth_token() {
+        for (token, expected) in [
+            (None, None),
+            (Some(""), None),
+            (Some(" \t\n "), None),
+            (Some(" test-token "), Some("test-token")),
+        ] {
+            let config = ShredStreamConfig {
+                auth_token: token.map(str::to_owned),
+                ..ShredStreamConfig::jito_grpc("http://127.0.0.1:10000")
+            };
+            let request = build_subscribe_request(config.auth_token.as_deref()).unwrap();
+            let header = request.metadata().get("x-token");
+            assert_eq!(header.map(|value| value.to_str().unwrap()), expected);
+            if let Some(header) = header {
+                assert!(header.is_sensitive());
+                assert!(!format!("{config:?}").contains("test-token"));
+            }
+        }
+    }
+
+    #[test]
+    fn subscription_request_rejects_invalid_auth_without_exposing_token() {
+        for token in [
+            "secret\nvalue",
+            "secret\rvalue",
+            "secret\0value",
+            "secret\u{7f}value",
+        ] {
+            let error = build_subscribe_request(Some(token))
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("Invalid ShredStream x-token metadata"));
+            assert!(!error.contains("secret"));
+        }
+    }
 
     #[test]
     fn jito_entry_decode_rejects_trailing_bytes() {
