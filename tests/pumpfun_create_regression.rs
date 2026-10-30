@@ -31,6 +31,16 @@ fn reported_create_v2_with_alt_accounts_keeps_create_and_trade_callbacks() {
         )
         .unwrap();
         signed.verify_and_hash_message().unwrap();
+        let expected_alt_addresses = signed
+            .message
+            .address_table_lookups()
+            .filter(|lookups| !lookups.is_empty())
+            .map(|lookups| {
+                lookups
+                    .iter()
+                    .map(|lookup| lookup.account_key)
+                    .collect::<Vec<_>>()
+            });
         assert_eq!(
             signed.signatures[0].to_string(),
             case["signature"].as_str().unwrap()
@@ -54,6 +64,7 @@ fn reported_create_v2_with_alt_accounts_keeps_create_and_trade_callbacks() {
             panic!("missing trade")
         };
         assert_eq!(create.ix_name, "create_v2");
+        assert_eq!(create.alt_addresses, expected_alt_addresses);
         assert_eq!(trade.ix_name, method);
         assert_eq!(trade.mint, create.mint);
         assert_eq!(trade.user, create.user);
@@ -90,6 +101,10 @@ fn reported_create_v2_with_alt_accounts_keeps_create_and_trade_callbacks() {
         )
         .unwrap();
         assert_eq!(resolved.len(), 2);
+        let DexEvent::PumpFunCreate(resolved_create) = &resolved[0] else {
+            panic!("resolved create")
+        };
+        assert_eq!(resolved_create.alt_addresses, expected_alt_addresses);
         let DexEvent::PumpFunTrade(complete) = &resolved[1] else {
             panic!("resolved trade")
         };

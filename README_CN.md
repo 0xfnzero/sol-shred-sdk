@@ -127,6 +127,20 @@ Raw shred 订阅直接从 `Entry` 交易解析交易中可见的指令数据。S
 - Meteora Pools、DAMM V2、DBC、DLMM
 - Token account、Nonce account、部分 DEX account state 事件和 block metadata 类型
 
+Pump.fun 创建事件提供 `alt_addresses: Option<Vec<Pubkey>>`，仅包含整笔交易的
+`MessageAddressTableLookup.account_key`，保留消息顺序和重复项。它不是表内加载的
+账户列表，也不代表每张表都用于创建指令；没有 ALT 或缺少交易上下文时为 `None`。
+读取该字段无需展开 ALT，也不调用 RPC；使用者可据此在接收任务之外安排缓存预热。
+仅带非空 ALT 列表的创建事件会分配列表。
+
+```rust
+if let Some(tables) = &create.alt_addresses {
+    for address in tables {
+        println!("ALT table: {address}");
+    }
+}
+```
+
 <a id="交易来源与解析边界"></a>
 
 ## 交易来源与解析边界

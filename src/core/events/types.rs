@@ -641,6 +641,11 @@ pub struct PumpFunMigrateBondingCurveCreatorEvent {
 /// PumpFun Create Token Event - Based on IDL CreateEvent definition
 #[derive(Debug, Clone, Serialize, Deserialize, Default, BorshDeserialize)]
 pub struct PumpFunCreateTokenEvent {
+    /// ALT account keys referenced by the whole transaction, in message order.
+    /// None when there are no lookups or transaction context is unavailable.
+    #[borsh(skip)]
+    #[serde(default)]
+    pub alt_addresses: Option<Vec<Pubkey>>,
     #[borsh(skip)]
     #[serde(default)]
     pub depth: u8,
@@ -717,6 +722,11 @@ pub struct PumpFunCreateTokenEvent {
 /// 与 solana-streamer 对齐；指令解析时从 accounts 0..15 填充。
 #[derive(Debug, Clone, Serialize, Deserialize, Default, BorshDeserialize)]
 pub struct PumpFunCreateV2TokenEvent {
+    /// ALT account keys referenced by the whole transaction, in message order.
+    /// None when there are no lookups or transaction context is unavailable.
+    #[borsh(skip)]
+    #[serde(default)]
+    pub alt_addresses: Option<Vec<Pubkey>>,
     #[borsh(skip)]
     pub metadata: EventMetadata,
     pub name: String,

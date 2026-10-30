@@ -1,5 +1,6 @@
 //! Offline raw transaction replay. --multi-hop selects the official PumpSwap
 //! route; --create-alt selects three reported create_v2 + buy transactions.
+//! Creation JSON includes alt_addresses: transaction ALT table keys, without resolving them.
 use base64::{engine::general_purpose::STANDARD, Engine};
 use sol_shred_sdk::{transaction::VersionedTransaction, Pubkey};
 
