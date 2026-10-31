@@ -370,8 +370,14 @@ CPMM 初始化从账户 3 读取 pool、账户 0 读取 creator；存取流动�
 本地差分回归的运行方式和覆盖边界见 [parser-parity](tools/parser-parity/README.md)。
 
 高层 UDP/Jito DEX 订阅也可通过 `ShredStreamClient::with_address_lookup_resolver`
-接入调用方 ALT 缓存。回调接收交易和 slot，返回 `message::v0::LoadedAddresses`，
-地址按消息 lookup 顺序排列；无 lookup 的交易不调用回调。解析失败或地址数量/索引
+接入调用方 ALT 缓存。回调参数为
+`(transaction, slot, recv_us, tx_index, event_type_filter)`，返回
+`message::v0::LoadedAddresses`，地址按消息 lookup 顺序排列。旧双参数闭包需补齐
+后三个参数，不使用时写 `_`。`recv_us` 是本地接收时间（微秒），`tx_index` 是本批
+entries 内序号，不是链上 slot 内序号；二者与事件 metadata 一致，过滤器借用且不克隆。
+miss 时可读取交易中的表地址/索引，自行处理后返回 `Err` 跳过 SDK 对该笔交易的解析；
+如需后台重试，可仅在错误分支克隆交易/过滤器并放入有界队列。
+无 lookup 的交易不调用回调。解析失败或地址数量/索引
 不合法时跳过该笔交易并继续接收。回调同步运行，适合读取预热缓存；调用方负责地址
 正确性以及对应 slot 的表状态。
 `client.address_lookup_stats()` 提供成功解析、解析失败和未配置 resolver 的 ALT 交易

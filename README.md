@@ -435,8 +435,15 @@ when deserializing older JSON; Rust struct literals need the new fields or
 
 Built-in UDP/Jito DEX subscriptions can also attach an ALT cache using
 `ShredStreamClient::with_address_lookup_resolver`. The callback receives the
-transaction and slot and returns `message::v0::LoadedAddresses` in message
-lookup order. Transactions without lookups do not invoke it. Resolution errors
+five arguments `(transaction, slot, recv_us, tx_index, event_type_filter)` and
+returns `message::v0::LoadedAddresses` in message lookup order. Existing two-argument
+closures must add the last three arguments (use `_` if unused). `recv_us` is the
+local receive timestamp in microseconds; `tx_index` is local to the entries batch,
+not an on-chain slot index. Both match event metadata, and the filter is borrowed
+without cloning. On a miss, inspect the transaction's table keys/indices or handle
+the transaction yourself, then return `Err` to skip SDK parsing. For background
+retry, clone the transaction/filter only on that error path and use a bounded queue.
+Transactions without lookups do not invoke it. Resolution errors
 or invalid counts/indices skip that transaction while reception continues. The
 callback runs synchronously and should read a prewarmed cache; the caller owns
 address identity and lookup-table state at the supplied slot.
