@@ -606,3 +606,5 @@ https://t.me/fnzero_group
 
 
 Shared stock bridges: 33 official stock/ETF mints and 58 pools. See [eleven-SDK catalog and routing alignment](docs/STOCK_BRIDGE_SYNC.md) for configuration, USDC routing and cache-only boundaries.
+
+Creation events expose `transaction_version` (`legacy` / `v0` / `v1`) and `alt_addresses` directly from the transaction message, without resolving ALT or calling RPC. Instruction-only parsing leaves the version absent. This is an unreleased source update.

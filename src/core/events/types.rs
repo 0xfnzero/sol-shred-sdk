@@ -646,6 +646,10 @@ pub struct PumpFunCreateTokenEvent {
     #[borsh(skip)]
     #[serde(default)]
     pub alt_addresses: Option<Vec<Pubkey>>,
+    /// Transaction wire version; absent when only a raw instruction is available.
+    #[borsh(skip)]
+    #[serde(default)]
+    pub transaction_version: Option<crate::grpc::YellowstoneMessageVersion>,
     #[borsh(skip)]
     #[serde(default)]
     pub depth: u8,
@@ -727,6 +731,10 @@ pub struct PumpFunCreateV2TokenEvent {
     #[borsh(skip)]
     #[serde(default)]
     pub alt_addresses: Option<Vec<Pubkey>>,
+    /// Transaction wire version; absent when only a raw instruction is available.
+    #[borsh(skip)]
+    #[serde(default)]
+    pub transaction_version: Option<crate::grpc::YellowstoneMessageVersion>,
     #[borsh(skip)]
     pub metadata: EventMetadata,
     pub name: String,
