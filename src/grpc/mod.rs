@@ -3,7 +3,9 @@ pub mod shared;
 pub mod shredstream;
 pub mod types;
 
-pub use types::{event_type_from_dex_event, EventType, EventTypeFilter, Protocol};
+pub use types::{
+    event_type_from_dex_event, EventType, EventTypeFilter, Protocol, YellowstoneMessageVersion,
+};
 
 use std::sync::{Arc, LazyLock as Lazy, Mutex};
 

@@ -681,10 +681,21 @@ fn parse_transaction_with_account_keys(
     );
     let appended = &mut events[start..];
     crate::core::pumpfun_fee_enrich::enrich_pumpfun_same_tx_post_merge(appended);
+    let version = match &transaction.message {
+        VersionedMessage::Legacy(_) => crate::grpc::YellowstoneMessageVersion::Legacy,
+        VersionedMessage::V0(_) => crate::grpc::YellowstoneMessageVersion::V0,
+        VersionedMessage::V1(_) => crate::grpc::YellowstoneMessageVersion::V1,
+    };
     let mut metadata = appended.iter_mut().filter_map(|event| {
         let alt_addresses = match event {
-            DexEvent::PumpFunCreate(create) => Some(&mut create.alt_addresses),
-            DexEvent::PumpFunCreateV2(create) => Some(&mut create.alt_addresses),
+            DexEvent::PumpFunCreate(create) => {
+                create.transaction_version = Some(version);
+                Some(&mut create.alt_addresses)
+            }
+            DexEvent::PumpFunCreateV2(create) => {
+                create.transaction_version = Some(version);
+                Some(&mut create.alt_addresses)
+            }
             _ => None,
         };
         if let Some(alt_addresses) = alt_addresses {
@@ -2202,11 +2213,16 @@ mod tests {
                 panic!("previous create")
             };
             assert_eq!(previous.alt_addresses, Some(vec![first]));
+            assert_eq!(previous.transaction_version, None);
             let DexEvent::PumpFunCreate(created) = &events[1] else {
                 panic!("new create")
             };
             let expected = (!alt_keys.is_empty()).then_some(alt_keys);
             assert_eq!(created.alt_addresses, expected);
+            assert_eq!(
+                created.transaction_version,
+                Some(crate::grpc::YellowstoneMessageVersion::V0)
+            );
         }
     }
 

@@ -669,3 +669,12 @@ pub fn event_type_from_dex_event(event: &crate::core::events::DexEvent) -> Optio
         DexEvent::Error(_) => None,
     }
 }
+
+/// Transaction wire version, serialized consistently with sol-parser-sdk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum YellowstoneMessageVersion {
+    Legacy,
+    V0,
+    V1,
+}

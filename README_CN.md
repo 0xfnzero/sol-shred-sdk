@@ -479,3 +479,5 @@ See [real RPC examples and validation limits](examples/PUMPSWAP_RPC.md).
 
 
 股票池同步：33 种官方股票/ETF、58 个股票池；配置扩展、USDC 起点、缓存选路与使用边界见 [11 SDK 同步说明](docs/STOCK_BRIDGE_SYNC.md)。
+
+创建事件现在同时提供 `transaction_version`（`legacy` / `v0` / `v1`）与 `alt_addresses`。直接从交易消息读取，不解析 ALT、不请求 RPC；仅指令解析时版本为空。此项为尚未发布的源码更新。
