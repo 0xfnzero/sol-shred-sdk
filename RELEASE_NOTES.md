@@ -1,11 +1,15 @@
-# sol-shred-sdk v6.0.2
+# sol-shred-sdk v7.0.0
 
-Released 2026-10-26.
+Released November 3, 2026.
 
-Synchronize Pump.fun create_v2 account filling and ShredStream parsing with the Rust parser core; preserve input-only and unresolved account semantics.
+## Changes
 
-同步 Rust 解析核心的 create_v2 账户填充与 ShredStream 解析修复，保留输入数据与未解析账户的语义。
+Remove parse-status types and fields; preserve wrapper provenance. Add ShredStream x-token authentication and expanded ALT resolver context. Preserve Pump.fun creation transaction versions and ALT account keys. Synchronize native replay examples and downstream API semantics. No RPC is added to parsing.
 
-## Validation / 验证
+## Migration
 
-Native-language regression suites and replay/build checks passed for the synchronized changes. Four trade implementations completed curve buy/sell and pool buy/sell unsigned mainnet simulations (16 successful simulations); these small-amount interface checks do not replace fresh production quotes. No transaction was broadcast.
+Remove TradeParseStatus / PumpFunParseStatus / parse_status usage. Update custom resolver callbacks and initialize new event/config fields; use constructors or Default where available. This release changes public Rust APIs and therefore increments the major version.
+
+## Validation
+
+Library regressions, captured creation transactions and multi-hop parsing tests passed. Live provider subscriptions were not exercised.
